@@ -1,0 +1,19 @@
+{
+  "name": "e",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "grunt testem:run:unit"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "grunt-contrib-jshint": "^0.11.3",
+    "grunt-contrib-testem": "^0.5.16"
+  },
+  "dependencies": {
+    "jquery": "^2.1.4",
+    "lodash": "^3.10.1"
+  }
+}
