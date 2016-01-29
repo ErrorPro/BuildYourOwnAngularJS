@@ -860,7 +860,7 @@ describe('Scope', function() {
       var child = parent.$new();
       child.aValue = [1, 2, 3];
       expect(parent.aValue).toBeUndefined();
-    })
+    });
 
     it('inherits the parents properties whenever they are defined', function() {
       var parent = new Scope();
@@ -869,7 +869,7 @@ describe('Scope', function() {
       parent.aValue = [1, 2, 3];
 
       expect(child.aValue).toEqual([1, 2, 3])
-    })
+    });
 
     it('can manipulate a parent scopes property', function() {
       var parent = new Scope();
@@ -880,7 +880,7 @@ describe('Scope', function() {
 
       expect(child.aValue).toEqual([1, 2, 3, 4])
       expect(parent.aValue).toEqual([1, 2, 3, 4])
-    })
+    });
 
     it('can watch a property in the parent', function() {
       var parent = new Scope();
@@ -902,7 +902,7 @@ describe('Scope', function() {
       parent.aValue.push(4);
       child.$digest();
       expect(child.counter).toBe(2);
-    })
+    });
 
     it('can be nested at any depth', function() {
       var a = new Scope();
@@ -925,7 +925,7 @@ describe('Scope', function() {
       expect(abb.anotherValue).toBe(2);
       expect(aa.anotherValue).toBeUndefined();
       expect(aaa.anotherValue).toBeUndefined();
-    })
+    });
 
     it('shadows a parents property with the same name', function() {
       var parent = new Scope();
@@ -936,7 +936,7 @@ describe('Scope', function() {
 
       expect(child.name).toBe('Jill');
       expect(parent.name).toBe('Joe');
-    })
+    });
 
     it('does not shadow members of parent scopes attributes', function() {
       var parent = new Scope();
@@ -947,7 +947,7 @@ describe('Scope', function() {
 
       expect(child.user.name).toBe('Jill');
       expect(parent.user.name).toBe('Jill');
-    })
+    });
 
     it('doesnt digest its parent', function() {
       var parent = new Scope();
@@ -963,7 +963,7 @@ describe('Scope', function() {
 
       child.$digest();
       expect(child.aValueWas).toBeUndefined();
-    })
+    });
 
     it('keeps a record of its children', function() {
       var parent = new Scope();
@@ -978,7 +978,7 @@ describe('Scope', function() {
       expect(child1.$$children.length).toBe(0);
       expect(child2.$$children.length).toBe(1);
       expect(child2.$$children[0]).toBe(child2_1);
-    })
+    });
 
     it('digests its children', function() {
       var parent = new Scope();
@@ -994,11 +994,11 @@ describe('Scope', function() {
 
       parent.$digest();
       expect(child.aValueWas).toBe('abc');
-    })
+    });
 
     it('digests from root on $apply', function() {
       var parent = new Scope();
-      var child1 = parent.$new();
+      var child = parent.$new();
       var child2 = child.$new();
 
       parent.aValue = 'abc';
@@ -1013,6 +1013,184 @@ describe('Scope', function() {
       child2.$apply(function(scope) {});
 
       expect(parent.counter).toBe(1);
+    });
+
+    it('schedules a digest from root on $evalAsync', function(done) {
+      var parent = new Scope();
+      var child = parent.$new();
+      var child2 = child.$new();
+
+      parent.aValue = 'abc';
+      parent.counter = 0;
+      parent.$watch(
+        function(scope) { return scope.aValue; },
+        function(newValue, oldValue, scope) {
+          scope.counter++;
+        }
+      )
+
+      child2.$evalAsync(function(scope) {
+
+      })
+
+      setTimeout(function() {
+        expect(parent.counter).toBe(1);
+        done();
+      }, 50);
+    });
+
+    it('doesnt have access to parent attributes when isolated', function() {
+      var parent = new Scope();
+      var child = parent.$new(true);
+
+      parent.aValue = 'abc';
+
+      expect(child.aValue).toBeUndefined();
+    });
+
+    it('cannot watch parent attributes when isolated', function() {
+      var parent = new Scope();
+      var child = parent.$new(true);
+
+      parent.aValue = 'abc';
+
+      child.$watch(
+        function(scope) { return scope.aValue },
+        function(newValue, oldValue, scope) {
+          scope.aValueWas = newValue;
+        }
+      );
+
+      child.$digest();
+      expect(child.aValueWas).toBeUndefined();
+    });
+
+    it('executes $evalAsync functions on isolated scopes', function(done) {
+      var parent = new Scope();
+      var child = parent.$new(true);
+
+      child.$evalAsync(function(scope) {
+        scope.didEvalAsync = true;
+      })
+
+      setTimeout(function() {
+        expect(child.didEvalAsync).toBe(true);
+        done()
+      }, 50)
+    });
+
+    it('executes $$postDigest functions on isolated scopes', function(done) {
+      var parent = new Scope();
+      var child = parent.$new(true);
+
+      child.$$postDigest(function() {
+        child.didPostDigest = true;
+      });
+
+      parent.$digest();
+
+      setTimeout(function() {
+        expect(child.didPostDigest).toBe(true);
+        done()
+      }, 50)
+    });
+
+    it('can take some other scope as the parent', function() {
+      var prototypeParent = new Scope();
+      var hierarchyParent = new Scope();
+      var child = prototypeParent.$new(false, hierarchyParent);
+
+      prototypeParent.a = 42;
+      expect(child.a).toBe(42);
+
+      child.counter = 0;
+      child.$watch(function(scope) {
+        scope.counter++;
+      })
+
+      prototypeParent.$digest();
+      expect(child.counter).toBe(0);
+
+      hierarchyParent.$digest();
+      expect(child.counter).toBe(2)
+    });
+
+    it('is no longer digested when $destroy has been called', function() {
+      var parent = new Scope();
+      var child = parent.$new();
+
+      child.aValue = [1, 2, 3];
+      child.counter = 0;
+      child.$watch(
+        function(scope) { return scope.aValue },
+        function(newValue, oldValue, scope) {
+          scope.counter++;
+        },
+        true
+      )
+
+      parent.$digest();
+      expect(child.counter).toBe(1);
+
+      child.aValue.push(4);
+      parent.$digest();
+      expect(child.counter).toBe(2);
+
+      child.$destroy();
+      child.aValue.push();
+      parent.$digest();
+      expect(child.counter).toBe(2);
+    })
+  })
+
+  describe('$watchCollection', function() {
+    var scope;
+
+    beforeEach(function() {
+      scope = new Scope();
+    })
+
+    it('works like a normal watch for non-collections', function() {
+      var valueProvided;
+
+      scope.aValue = 42;
+      scope.counter = 0;
+
+      scope.$watchCollection(
+        function(scope) { return a.value },
+        function(newValue, oldValue, scope) {
+          valueProvided = newValue;
+          scope.counter++;
+        }
+      )
+
+      scope.$digest();
+      expect(scope.counter).toBe(1);
+      expect(valueProvided).toBe(scope.aValue);
+
+      scope.aValue = 43;
+      scope.$digest();
+      expect(scope.counter).toBe(2);
+
+      scope.$digest();
+      expect(scope.counter).toBe(2);
+    });
+
+    it('works like a normal watch for NaNs', function() {
+      scope.aValue = 0/0;
+      scope.counter = 0;
+
+      scope.$watchCollection(
+        function(scope) { return scope.aValue; },
+        function(newValue, oldValue, scope) {
+          scope.counter++;
+        }
+      );
+
+      scope.$digest();
+      expect(scope.counter).toBe(1);
+      scope.$digest();
+      expect(scope.counter).toBe(1);
     })
   })
 })
