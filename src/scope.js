@@ -8,6 +8,7 @@ function Scope() {
     this.$$postDigestQueue = [];
     this.$root = this;
     this.$$children = [];
+    this.$$listeners = {};
     this.$$phase = null;
 }
 
@@ -239,6 +240,7 @@ Scope.prototype.$new = function(isolated, parent) {
 
   parent.$$children.push(child);
   child.$$watchers = [];
+  child.$$listeners = {};
   child.$$children = [];
   child.$parent = parent;
 
@@ -351,4 +353,44 @@ Scope.prototype.$watchCollection = function(watchFn, listenerFn) {
   };
 
   return this.$watch(internalWatchFn, internalListenerFn);
+}
+
+Scope.prototype.$on = function(eventName, listener) {
+  var listeners = this.$$listeners[eventName];
+  if (!listeners) {
+    this.$$listeners[eventName] = listeners = [];
+  }
+  listeners.push(listener);
+  return function() {
+    var index = listeners.indexOf(listener);
+    if (index >= 0) {
+      listeners[index] = null;
+    }
+  }
+}
+
+Scope.prototype.$emit = function(eventName) {
+  var additionalArgs = _.rest(arguments);
+  return this.$$fireEventOnScope(eventName, additionalArgs);
+};
+
+Scope.prototype.$broadcast = function(eventName) {
+  var additionalArgs = _.rest(arguments);
+  return this.$$fireEventOnScope(eventName, additionalArgs);
+}
+
+Scope.prototype.$$fireEventOnScope = function(eventName, additionalArgs) {
+  var event = {name: eventName};
+  var listenerArgs = [event].concat(additionalArgs);
+  var listeners = this.$$listeners[eventName] || [];
+  var i = 0;
+  while (i < listeners.length) {
+    if (listeners[i] === null) {
+      listeners.splice(i, 1);
+    } else {
+      listeners[i].apply(null, listenerArgs);
+      i++;
+    }
+  }
+  return event;
 }
