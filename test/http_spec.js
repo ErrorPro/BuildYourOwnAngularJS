@@ -7,6 +7,7 @@ describe('$http', function () {
   var $http;
   var $rootScope;
   var xhr;
+  var $q;
   var requests = [];
 
   beforeEach(function() {
@@ -14,6 +15,7 @@ describe('$http', function () {
     var injector = createInjector(['ng']);
     $http = injector.get('$http');
     $rootScope = injector.get('$rootScope');
+    $q = injector.get('$q');
   });
 
   beforeEach(function() {
@@ -822,5 +824,67 @@ describe('$http', function () {
     $rootScope.$apply();
 
     expect(responseErrorSpy).toHaveBeenCalledWith('fail');
+  });
+
+  it('allows attaching success handlers', function() {
+    var data, status, headers, config;
+    $http.get('http://teropa.info').success(function(d, s, h, c) {
+      data = d;
+      status = s;
+      headers = h;
+      config = c;
+    });
+    $rootScope.$apply();
+
+    requests[0].respond(200, {'Cache-Control': 'no-cache'}, 'Hello');
+    $rootScope.$apply();
+
+    expect(data).toBe('Hello');
+    expect(status).toBe(200);
+    expect(headers('Cache-Control')).toBe('no-cache');
+    expect(config.method).toBe('GET');
+  });
+
+  it('allows attaching error handlers', function() {
+    var data, status, headers, config;
+    $http.get('http://teropa.info').error(function(d, s, h, c) {
+      data = d;
+      status = s;
+      headers = h;
+      config = c;
+    });
+    $rootScope.$apply();
+
+    requests[0].respond(401, {'Cache-Control': 'no-cache'}, 'Fail');
+    $rootScope.$apply();
+
+    expect(data).toBe('Fail');
+    expect(status).toBe(401);
+    expect(headers('Cache-Control')).toBe('no-cache');
+    expect(config.method).toBe('GET');
+  });
+
+  it('allows aborting a request with a promise', function() {
+    var timeout = $q.defer();
+    $http.get('http://teropa.info', {
+      timeout: timeout.promise
+    });
+    $rootScope.$apply();
+
+    timeout.resolve();
+    $rootScope.$apply();
+
+    expect(requests[0].aborted).toBe(true);
+  });
+
+  it('allows aborting a request after a timeout', function() {
+    $http.get('http://teropa.info', {
+      timeout: 5000
+    });
+    $rootScope.$apply();
+
+    setTimeout(function () {
+      expect(requests[0].aborted).toBe(true);
+    }, 5001);
   });
 });
