@@ -17,8 +17,47 @@ function parse(expr) {
   return parser.parse(expr);
 }
 
-function Lexer() {
+var getterFn = _.memorize(function(indent) {
+  var pathKeys = indent.split('.');
+  if (pathKeys.length === 1) {
+    return simpleGetterFn1(pathKeys[0]);
+  } else if (pathKeys.lenth === 2) {
+    return simpleGetterFn2(pathKeys[0], pathKeys[1]);
+  } else {
+    return generatedGetterFn(pathKeys)
+  }
+});
 
+var generatedGetterFn = function(keys) {
+  var code = '';
+
+  _.forEach(keys, function(key) {
+    code += 'if (!scope) { return undefined; }\n';
+    code += 'scope = scope["' + key + '"];\n';
+  });
+
+  code += 'return scope;\n'
+
+  return new Function('scope', code);
+}
+
+var simpleGetterFn1 = function(key) {
+  return function(scope) {
+    return scope ? scope[key] : undefined;
+  }
+}
+
+var simpleGetterFn2 = function(key1, key2) {
+  return function(scope) {
+    if (!scope) {
+      return undefined;
+    }
+    scope = scope[key1];
+    return scope ? scope[key2] : undefined;
+  }
+}
+
+function Lexer() {
 }
 
 Lexer.prototype.lex = function(text) {
@@ -29,11 +68,12 @@ Lexer.prototype.lex = function(text) {
 
   while (this.index < this.text.length) {
     this.ch = this.text.charAt(this.index);
-    if (this.isNumber(this.ch) || (this.ch === '.' && this.isNumber(this.peek()))) {
+    if (this.isNumber(this.ch) ||
+         (this.is('.') && this.isNumber(this.peek()))) {
       this.readNumber();
-    } else if (this.ch === '\'' || this.ch === '"') {
+    } else if (this.is('\'"')) {
       this.readString(this.ch);
-    } else if (this.ch === '[' || this.ch === ']' || this.ch === ',') {
+    } else if (this.is('[],{}:')) {
       this.tokens.push({
         text: this.ch
       });
@@ -52,6 +92,10 @@ Lexer.prototype.lex = function(text) {
 
 Lexer.prototype.isNumber = function(ch) {
   return '0' <= ch && ch <= '9';
+}
+
+Lexer.prototype.is = function (chs) {
+  return chs.indexOf(this.ch) >= 0;
 }
 
 Lexer.prototype.readNumber = function() {
@@ -116,6 +160,7 @@ Lexer.prototype.readString = function(quote) {
       this.index++;
       this.tokens.push({
         text: rawString,
+        string: string,
         constant: true,
         fn: _.constant(string)
       });
@@ -134,7 +179,7 @@ Lexer.prototype.readIdent = function() {
   var text = '';
   while (this.index < this.text.length) {
     var ch = this.text.charAt(this.index);
-    if (this.isIdent(ch) || this.isNumber(ch)) {
+    if (ch === '.' || this.isIdent(ch) || this.isNumber(ch)) {
       text += ch;
     } else {
       break;
@@ -144,7 +189,7 @@ Lexer.prototype.readIdent = function() {
 
   var token = {
     text: text,
-    fn: CONSTANTS[text]
+    fn: CONSTANTS[text] || getterFn(text)
   };
 
   this.tokens.push(token);
@@ -181,9 +226,11 @@ Parser.prototype.primary = function() {
   var primary;
   if (this.expect('[')) {
     primary = this.arrayDeclaration();
-  } else {
+  } else if (this.expect('{')) {
+    primary = this.object();
+  } else{
     var token = this.expect();
-    var primary = token.fn;
+    primary = token.fn;
     if (token.constant) {
       primary.constant = true;
       primary.literal = true;
@@ -233,4 +280,30 @@ Parser.prototype.peek = function(e) {
       return this.tokens[0]
     }
   }
+}
+
+Parser.prototype.object = function() {
+  var keyValues = [];
+  if (!this.peek('}')) {
+    do {
+      var keyToken = this.expect();
+      this.consume(':');
+      var valueExpression = this.primary();
+      keyValues.push({
+        key: keyToken.string || keyToken.text,
+        value: valueExpression
+      });
+    } while (this.expect(','));
+  }
+  this.consume('}');
+  var objectFn = function() {
+    var object = {};
+    _.forEach(keyValues, function(kv) {
+      object[kv.key] = kv.value();
+    });
+    return object;
+  };
+  objectFn.literal = true;
+  objectFn.constant = true;
+  return objectFn;
 }

@@ -138,5 +138,42 @@ describe('parse', function() {
     var fn = parse('[1, 2, 3]');
     expect(fn.literal).toBe(true);
     expect(fn.constant).toBe(true);
+  });
+
+  it('will parse an empty object', function() {
+    var fn = parse('{}');
+    expect(fn()).toEqual({});
+  });
+
+  it('will parse a non-empty object', function() {
+    var fn = parse('{a: 1, b: [2, 3], c: {d: 4}}');
+    expect(fn()).toEqual({a: 1, b: [2, 3], c: {d: 4}});
+  });
+
+  it('will parse an object with string keys', function() {
+    var fn = parse('{"a key": 1, \'another-key\': 2}');
+    expect(fn()).toEqual({'a key': 1, 'another-key': 2})
+  });
+
+  it('looks up an attribute from the scope', function() {
+    var fn = parse('aKey');
+    expect(fn({aKey: 42})).toBe(42);
+    expect(fn({})).toBeUndefined();
+    expect(fn()).toBeUndefined();
+  });
+
+  it('looks up a 2-part indentifier path from the scope', function() {
+    var fn = parse('akey.anotherKey');
+    expect(fn({akey: {anotherKey: 42}})).toBe(42);
+    expect(fn({aKey: {}})).toBeUndefined();
+    expect(fn()).toBeUndefined();
+  });
+
+  it('looks up a 4-part indentifier path from the scope', function() {
+    var fn = parse('aKey.secondKey.thirdKey.fourthKey');
+    expect(fn({aKey: {secondKey: {thirdKey: {fourthKey: 42}}}})).toBe(42);
+    expect(fn({aKey: {secondKey: {thirdKey: {}}}})).toBeUndefined();
+    expect(fn({aKey: {}})).toBeUndefined();
+    expect(fn()).toBeUndefined();
   })
 })
