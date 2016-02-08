@@ -446,4 +446,98 @@ describe('parse', function() {
     var fn = parse('fun.bind(obj)');
     expect(function() { fn({fun: function() { }, obj: {}}); }).toThrow();
   });
+
+  it('parses a simple attribute assigment', function() {
+    var fn = parse('anAttribute = 42');
+    var scope = {};
+    fn(scope);
+    expect(scope.anAttribute).toBe(42);
+  });
+
+  it('can assign any primary expression', function() {
+    var fn = parse('anAttribute = aFunction()');
+    var scope = {aFunction: _.constant(42)};
+    fn(scope);
+    expect(scope.anAttribute).toBe(42);
+  });
+
+  it('parses a nested attribute assigment', function() {
+    var fn = parse('anObject.anAttribute = 42');
+    var scope = {anObject: {}};
+    fn(scope);
+    expect(scope.anObject.anAttribute).toBe(42);
+  });
+
+  it('creates the objects in the setter path that do not exist', function() {
+    var fn = parse('some.nested.path = 42');
+    var scope = {};
+    fn(scope);
+    expect(scope.some.nested.path).toBe(42);
+  });
+
+  it('parses an assigment through attribute access', function() {
+    var fn = parse('anObject["anAttribute"] = 42');
+    var scope = {anObject: {}};
+    fn(scope);
+    expect(scope.anObject.anAttribute).toBe(42);
+  });
+
+  it('parses assigment through field access after something else', function() {
+    var fn = parse('anObject["otherObject"].nested = 42');
+    var scope = {anObject: {otherObject: {}}};
+    fn(scope);
+    expect(scope.anObject.otherObject.nested).toBe(42);
+  });
+
+  it('parses an array with non-liteals', function() {
+    var fn = parse('[a, b, c()]');
+    expect(fn({a: 1, b: 2, c: _.constant(3)})).toEqual([1, 2, 3]);
+  });
+
+  it('parses an object with non-literals', function() {
+    var fn = parse('{a: a, b: obj.c()}');
+    expect(fn({
+      a: 1,
+      obj: {
+        b: _.constant(2),
+        c: function() {
+          return this.b();
+        }
+      }
+    })).toEqual({a: 1, b: 2});
+  });
+
+  it('makes arrays constant when they only contain constant', function() {
+    var fn = parse('[1, 2, [3, 4]]');
+    expect(fn.constant).toBe(true);
+  });
+
+  it('makes arrays non-constant when they contain non-constants', function() {
+    expect(parse('[1, 2, a]').constant).toBe(false);
+    expect(parse('[1, 2, [[[[[a]]]]]]').constant).toBe(false);
+  });
+
+  it('makes objects constant when they only contain constants', function() {
+    var fn = parse('{a: 1, b: {c: 3}}');
+    expect(fn.constant).toBe(true);
+  });
+
+  it('makes objects non-constant when they contain non-constants', function() {
+    expect(parse('{a: 1, b: c}').constant).toBe(false);
+    expect(parse('{a: 1, b: {c: d}}').constant).toBe(false);
+  });
+
+  it('allows an array element to be an assigment', function() {
+    var fn = parse('[a = 1]');
+    var scope = {};
+    expect(fn(scope)).toEqual([1]);
+    expect(scope.a).toBe(1);
+  });
+
+  it('allows an object value to be an assigment', function() {
+    var fn = parse('{a: b = 1}');
+    var scope = {};
+    expect(fn(scope)).toEqual({a: 1});
+    expect(scope.b).toBe(1);
+  });
 });

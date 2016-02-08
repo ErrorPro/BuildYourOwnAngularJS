@@ -23,14 +23,35 @@ function parse(expr) {
 
 var getterFn = _.memoize(function(ident) {
   var pathKeys = ident.split('.');
+  var fn;
   if (pathKeys.length === 1) {
-    return simpleGetterFn1(pathKeys[0]);
+    fn = simpleGetterFn1(pathKeys[0]);
   } else if (pathKeys.length === 2) {
-    return simpleGetterFn2(pathKeys[0], pathKeys[1]);
+    fn = simpleGetterFn2(pathKeys[0], pathKeys[1]);
   } else {
-    return generatedGetterFn(pathKeys);
+    fn = generatedGetterFn(pathKeys);
   }
+
+  fn.assign = function(self, value) {
+    return setter(self, ident, value);
+  };
+
+  return fn;
 });
+
+var setter = function(object, path, value) {
+  var keys = path.split('.');
+  while (keys.length > 1) {
+    var key = keys.shift();
+    ensureSafeMemberName(key);
+    if (!object.hasOwnProperty(key)) {
+      object[key] = {};
+    }
+    object = object[key];
+  }
+  object[keys.shift()] = value;
+  return value;
+};
 
 var generatedGetterFn = function(keys) {
   var code = '';
@@ -127,7 +148,7 @@ Lexer.prototype.lex = function(text) {
       this.readNumber();
     } else if (this.is('\'"')) {
       this.readString(this.ch);
-    } else if (this.is('[],{}:.()')) {
+    } else if (this.is('[],{}:.()=')) {
       this.tokens.push({
         text: this.ch
       });
@@ -300,7 +321,7 @@ function Parser(lexer) {
 
 Parser.prototype.parse = function(text) {
   this.tokens = this.lexer.lex(text);
-  return this.primary();
+  return this.assigment();
 };
 
 Parser.prototype.primary = function() {
@@ -349,17 +370,17 @@ Parser.prototype.arrayDeclaration = function() {
       if (this.peek(']')) {
         break;
       }
-      elementFns.push(this.primary());
+      elementFns.push(this.assigment());
     } while (this.expect(','));
   }
   this.consume(']');
-  var arrayFn = function() {
+  var arrayFn = function(scope, locals) {
     return _.map(elementFns, function(elementFn) {
-      return elementFn();
+      return elementFn(scope, locals);
     });
   };
   arrayFn.literal = true;
-  arrayFn.constant = true;
+  arrayFn.constant = _.every(elementFns, 'constant');
   return arrayFn;
 };
 
@@ -385,7 +406,7 @@ Parser.prototype.object = function() {
     do {
       var keyToken = this.expect();
       this.consume(':');
-      var valueExpression = this.primary();
+      var valueExpression = this.assigment();
       keyValues.push({
         key: keyToken.string || keyToken.text,
         value: valueExpression
@@ -393,34 +414,46 @@ Parser.prototype.object = function() {
     } while (this.expect(','));
   }
   this.consume('}');
-  var objectFn = function() {
+  var objectFn = function(scope, locals) {
     var object = {};
     _.forEach(keyValues, function(kv) {
-      object[kv.key] = kv.value();
+      object[kv.key] = kv.value(scope, locals);
     });
     return object;
   };
   objectFn.literal = true;
-  objectFn.constant = true;
+  objectFn.constant = _(keyValues).pluck('value').every('constant');
   return objectFn;
 };
 
 Parser.prototype.objectIndex = function(objFn) {
   var indexFn = this.primary();
   this.consume(']');
-  return function(scope, locals) {
+  var objectIndexFn = function(scope, locals) {
     var obj = objFn(scope, locals);
     var index = indexFn(scope, locals);
     return ensureSafeObject(obj[index]);
   };
+  objectIndexFn.assign = function(self, value, locals) {
+    var obj = ensureSafeObject(objFn(self, locals));
+    var index = indexFn(self, locals);
+    return (obj[index] = value);
+  };
+  return objectIndexFn;
 };
 
 Parser.prototype.fieldAccess = function(objFn) {
-  var getter = this.expect().fn;
-  return function(scope, locals) {
+  var token = this.expect();
+  var getter = token.fn;
+  var fieldAccessFn = function(scope, locals) {
     var obj = objFn(scope, locals);
     return getter(obj);
   };
+  fieldAccessFn.assign = function(self, value, locals) {
+    var obj = objFn(self, locals);
+    return setter(obj, token.text, value);
+  };
+  return fieldAccessFn;
 };
 
 Parser.prototype.functionCall = function(fnFn, contextFn) {
@@ -439,6 +472,20 @@ Parser.prototype.functionCall = function(fnFn, contextFn) {
     });
     return ensureSafeObject(fn.apply(context, args));
   };
+};
+
+Parser.prototype.assigment = function() {
+  var left = this.primary();
+  if (this.expect('=')) {
+    if (!left.assign) {
+      throw 'Implies assigment but cannot be assigned to';
+    }
+    var right =  this.primary();
+    return function(scope, locals) {
+      return left.assign(scope, right(scope, locals), locals);
+    };
+  }
+  return left;
 };
 
 module.exports = parse;
