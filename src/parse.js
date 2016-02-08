@@ -1,6 +1,10 @@
 'use strict';
+var _ = require('lodash');
 
 var ESCAPES = { n: '\n', f: '\f', r: '\r', t: '\t', v: '\v', '\'': '\'', '"': '"' };
+var CALL = Function.prototype.call;
+var APPLY = Function.prototype.apply;
+var BIND = Function.prototype.bind;
 var CONSTANTS = {
   'null': _.constant(null),
   'true': _.constant(true),
@@ -17,45 +21,95 @@ function parse(expr) {
   return parser.parse(expr);
 }
 
-var getterFn = _.memorize(function(indent) {
-  var pathKeys = indent.split('.');
+var getterFn = _.memoize(function(ident) {
+  var pathKeys = ident.split('.');
   if (pathKeys.length === 1) {
     return simpleGetterFn1(pathKeys[0]);
-  } else if (pathKeys.lenth === 2) {
+  } else if (pathKeys.length === 2) {
     return simpleGetterFn2(pathKeys[0], pathKeys[1]);
   } else {
-    return generatedGetterFn(pathKeys)
+    return generatedGetterFn(pathKeys);
   }
 });
 
 var generatedGetterFn = function(keys) {
   var code = '';
 
-  _.forEach(keys, function(key) {
+  _.forEach(keys, function(key, idx) {
+    ensureSafeMemberName(key);
     code += 'if (!scope) { return undefined; }\n';
-    code += 'scope = scope["' + key + '"];\n';
+    if (idx === 0) {
+      code += 'scope = (locals && locals.hasOwnProperty("'+ key +'")) ? ' +
+      'locals["' + key + '"] : ' +
+      'scope["' + key +'"];\n';
+    } else {
+      code += 'scope = scope["' + key + '"];\n';
+    }
   });
 
-  code += 'return scope;\n'
+  code += 'return scope;\n';
 
-  return new Function('scope', code);
-}
+  return new Function('scope', 'locals', code);
+};
 
 var simpleGetterFn1 = function(key) {
-  return function(scope) {
-    return scope ? scope[key] : undefined;
-  }
-}
-
-var simpleGetterFn2 = function(key1, key2) {
-  return function(scope) {
+  ensureSafeMemberName(key);
+  return function(scope, locals) {
     if (!scope) {
       return undefined;
     }
-    scope = scope[key1];
+    return (locals && locals.hasOwnProperty(key)) ? locals[key] : scope[key];
+  };
+};
+
+var simpleGetterFn2 = function(key1, key2) {
+  ensureSafeMemberName(key1);
+  ensureSafeMemberName(key2);
+  return function(scope, locals) {
+    if (!scope) {
+      return undefined;
+    }
+    scope = (locals && locals.hasOwnProperty(key1)) ?
+              locals[key1] :
+              scope[key1];
     return scope ? scope[key2] : undefined;
+  };
+};
+
+var ensureSafeMemberName = function(name) {
+  if (name === 'constructor' || name === '__proto__' ||
+      name === '__defineGetter__' || name === '__defineSetter__' ||
+      name === '__lookupGetter__' || name === '__lookupSetter__') {
+    throw 'Referencing "constructor" field is expression is disallowed!';
   }
-}
+};
+
+var ensureSafeObject = function(obj) {
+  if (obj) {
+    if (obj.document && obj.location && obj.alert && obj.setInterval) {
+      throw 'Referencing window in Angular expression is disallowed!';
+    } else if (obj.children &&
+                (obj.nodeName || (obj.prop && obj.attr && obj.find))) {
+      throw 'Referencing DON nodes in Angular expressions is disallowed!';
+    } else if (obj.constructor === obj) {
+      throw 'Referencing Function in Angular expressions is disallowed!';
+    } else if (obj.getOwnPropertyNames || obj.getOwnPropertyDescriptor) {
+      throw 'Referencing Object in Angular expressions is disallowed!';
+    }
+  }
+  return obj;
+};
+
+var ensureSafeFunction = function(obj) {
+  if (obj) {
+    if (obj.constructor === obj) {
+      throw 'Referencing Function in Angular expressions is disallowed!';
+    } else if (obj === CALL || obj === APPLY || obj.BIND) {
+      throw 'Referencing call, apply, or bind in Angular expressions is disallowed!';
+    }
+  }
+  return obj;
+};
 
 function Lexer() {
 }
@@ -73,7 +127,7 @@ Lexer.prototype.lex = function(text) {
       this.readNumber();
     } else if (this.is('\'"')) {
       this.readString(this.ch);
-    } else if (this.is('[],{}:')) {
+    } else if (this.is('[],{}:.()')) {
       this.tokens.push({
         text: this.ch
       });
@@ -88,15 +142,15 @@ Lexer.prototype.lex = function(text) {
   }
 
   return this.tokens;
-}
+};
 
 Lexer.prototype.isNumber = function(ch) {
   return '0' <= ch && ch <= '9';
-}
+};
 
 Lexer.prototype.is = function (chs) {
   return chs.indexOf(this.ch) >= 0;
-}
+};
 
 Lexer.prototype.readNumber = function() {
   var number = '';
@@ -127,8 +181,8 @@ Lexer.prototype.readNumber = function() {
     text: number,
     fn: _.constant(number),
     constant: true
-  })
-}
+  });
+};
 
 Lexer.prototype.readString = function(quote) {
   this.index++;
@@ -173,18 +227,35 @@ Lexer.prototype.readString = function(quote) {
     this.index++;
   }
   throw 'Unmatched quote';
-}
+};
 
 Lexer.prototype.readIdent = function() {
   var text = '';
+  var start = this.index;
+  var lastDotAt;
   while (this.index < this.text.length) {
     var ch = this.text.charAt(this.index);
     if (ch === '.' || this.isIdent(ch) || this.isNumber(ch)) {
+      if (ch === '.') {
+        lastDotAt = this.index;
+      }
       text += ch;
     } else {
       break;
     }
     this.index++;
+  }
+
+  var methodName;
+  if (lastDotAt) {
+    var peekIndex = this.index;
+    while (this.isWhitespace(this.text.charAt(peekIndex))) {
+      peekIndex++;
+    }
+    if (this.text.charAt(peekIndex) === '(') {
+      methodName = text.substring(lastDotAt - start + 1);
+      text = text.substring(0, lastDotAt - start);
+    }
   }
 
   var token = {
@@ -193,25 +264,35 @@ Lexer.prototype.readIdent = function() {
   };
 
   this.tokens.push(token);
-}
+
+  if (methodName) {
+    this.tokens.push({
+      text: '.'
+    });
+    this.tokens.push({
+      text: methodName,
+      fn: getterFn(methodName)
+    });
+  }
+};
 
 Lexer.prototype.peek = function() {
   return this.index < this.text.length - 1 ? this.text.charAt(this.index + 1) : false;
-}
+};
 
 Lexer.prototype.isExpOperator = function(ch) {
   return ch === '-' || ch === '+' || this.isNumber(ch);
-}
+};
 
 Lexer.prototype.isIdent = function(ch) {
   return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
     ch === '_' || ch === '$';
-}
+};
 
 Lexer.prototype.isWhitespace = function(ch) {
   return (ch === ' ' || ch === '\r' || ch === '\t' ||
     ch === '\n' || ch === '\v' || ch === '\u00A0');
-}
+};
 
 function Parser(lexer) {
   this.lexer = lexer;
@@ -220,7 +301,7 @@ function Parser(lexer) {
 Parser.prototype.parse = function(text) {
   this.tokens = this.lexer.lex(text);
   return this.primary();
-}
+};
 
 Parser.prototype.primary = function() {
   var primary;
@@ -228,7 +309,7 @@ Parser.prototype.primary = function() {
     primary = this.arrayDeclaration();
   } else if (this.expect('{')) {
     primary = this.object();
-  } else{
+  } else {
     var token = this.expect();
     primary = token.fn;
     if (token.constant) {
@@ -236,15 +317,30 @@ Parser.prototype.primary = function() {
       primary.literal = true;
     }
   }
-  return primary;
-}
 
-Parser.prototype.expect = function(e) {
-  var token = this.peek(e);
+  var next;
+  var context;
+  while ((next = this.expect('[', '.', '('))) {
+    if (next.text === '[') {
+      context = primary;
+      primary = this.objectIndex(primary);
+    } else if (next.text === '.') {
+      context = primary;
+      primary = this.fieldAccess(primary);
+    } else if (next.text === '(') {
+      primary = this.functionCall(primary, context);
+      context = undefined;
+    }
+  }
+  return primary;
+};
+
+Parser.prototype.expect = function(e1, e2, e3, e4) {
+  var token = this.peek(e1, e2, e3, e4);
   if (token) {
     return this.tokens.shift();
   }
-}
+};
 
 Parser.prototype.arrayDeclaration = function() {
   var elementFns = [];
@@ -261,26 +357,27 @@ Parser.prototype.arrayDeclaration = function() {
     return _.map(elementFns, function(elementFn) {
       return elementFn();
     });
-  }
+  };
   arrayFn.literal = true;
   arrayFn.constant = true;
   return arrayFn;
-}
+};
 
 Parser.prototype.consume = function(e) {
   if (!this.expect(e)) {
     throw 'Unexpected. Expecting ' + e;
   }
-}
+};
 
-Parser.prototype.peek = function(e) {
+Parser.prototype.peek = function(e1, e2, e3, e4) {
   if (this.tokens.length > 0) {
     var text = this.tokens[0].text;
-    if (text === e || !e) {
-      return this.tokens[0]
+    if (text === e1 || text === e2 || text === e3 || text === e4 ||
+        (!e1 && !e2 && !e3 && !e4)) {
+      return this.tokens[0];
     }
   }
-}
+};
 
 Parser.prototype.object = function() {
   var keyValues = [];
@@ -306,4 +403,42 @@ Parser.prototype.object = function() {
   objectFn.literal = true;
   objectFn.constant = true;
   return objectFn;
-}
+};
+
+Parser.prototype.objectIndex = function(objFn) {
+  var indexFn = this.primary();
+  this.consume(']');
+  return function(scope, locals) {
+    var obj = objFn(scope, locals);
+    var index = indexFn(scope, locals);
+    return ensureSafeObject(obj[index]);
+  };
+};
+
+Parser.prototype.fieldAccess = function(objFn) {
+  var getter = this.expect().fn;
+  return function(scope, locals) {
+    var obj = objFn(scope, locals);
+    return getter(obj);
+  };
+};
+
+Parser.prototype.functionCall = function(fnFn, contextFn) {
+  var argFns = [];
+  if (!this.peek(')')) {
+    do {
+      argFns.push(this.primary());
+    } while (this.expect(','));
+  }
+  this.consume(')');
+  return function(scope, locals) {
+    var context = ensureSafeObject(contextFn ? contextFn(scope, locals) : scope);
+    var fn = ensureSafeFunction(fnFn(scope, locals));
+    var args = _.map(argFns, function(argFn) {
+      return argFn(scope, locals);
+    });
+    return ensureSafeObject(fn.apply(context, args));
+  };
+};
+
+module.exports = parse;
