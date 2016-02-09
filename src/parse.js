@@ -10,6 +10,17 @@ var CONSTANTS = {
   'true': _.constant(true),
   'false': _.constant(false)
 };
+var OPERATORS = {
+  '+': function() { },
+  '!': function(self, locals, a) {
+    return !a(self, locals);
+  },
+  '-': function(self, locals, a, b) {
+    a = a(self, locals);
+    b = b(self, locals);
+    return (_.isUndefined(a) ? 0 : a) - (_.isUndefined(b) ? 0 : b);
+  }
+};
 _.forEach(CONSTANTS, function(fn, constantName) {
   fn.constant = fn.literal = true;
 });
@@ -158,7 +169,16 @@ Lexer.prototype.lex = function(text) {
     } else if (this.isWhitespace(this.ch)) {
       this.index++;
     } else {
-      throw 'Unexpected next character: ' + this.ch;
+      var fn = OPERATORS[this.ch];
+      if (fn) {
+        this.tokens.push({
+          text: this.ch,
+          fn: fn
+        });
+        this.index++;
+      } else {
+        throw 'Unexpected next character: ' + this.ch;
+      }
     }
   }
 
@@ -475,17 +495,42 @@ Parser.prototype.functionCall = function(fnFn, contextFn) {
 };
 
 Parser.prototype.assigment = function() {
-  var left = this.primary();
+  var left = this.unary();
   if (this.expect('=')) {
     if (!left.assign) {
       throw 'Implies assigment but cannot be assigned to';
     }
-    var right =  this.primary();
+    var right =  this.unary();
     return function(scope, locals) {
       return left.assign(scope, right(scope, locals), locals);
     };
   }
   return left;
+};
+
+Parser.prototype.unary = function() {
+  var parser = this;
+  var operator;
+  var operand;
+  if (this.expect('+')) {
+    return this.primary();
+  } else if ((operator = this.expect('!'))) {
+    operand = parser.unary();
+    var unaryFn = function(self, locals) {
+      return operator.fn(self, locals, operand);
+    };
+    unaryFn.constant = operand.constant;
+    return unaryFn;
+  } else if ((operator = this.expect('-'))) {
+    operand = parser.unary();
+    var binaryFn = function(self, locals) {
+      return operator.fn(self, locals, _.constant(0), operand);
+    };
+    binaryFn.constant = operand.constant;
+    return binaryFn;
+  } else {
+    return this.primary();
+  }
 };
 
 module.exports = parse;
