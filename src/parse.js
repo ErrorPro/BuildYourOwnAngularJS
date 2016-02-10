@@ -11,7 +11,18 @@ var CONSTANTS = {
   'false': _.constant(false)
 };
 var OPERATORS = {
-  '+': function() { },
+  '+': function(self, locals, a, b) {
+    a = a(self, locals);
+    b = b(self, locals);
+    if (!_.isUndefined(a)) {
+      if (!_.isUndefined(b)) {
+        return a + b;
+      } else {
+        return a;
+      }
+    }
+    return b;
+  },
   '!': function(self, locals, a) {
     return !a(self, locals);
   },
@@ -19,7 +30,41 @@ var OPERATORS = {
     a = a(self, locals);
     b = b(self, locals);
     return (_.isUndefined(a) ? 0 : a) - (_.isUndefined(b) ? 0 : b);
-  }
+  },
+  '*': function(self, locals, a, b) {
+    return a(self, locals) * b(self, locals);
+  },
+  '/': function(self, locals, a, b) {
+    return a(self, locals) / b(self, locals);
+  },
+  '%': function(self, locals, a, b) {
+    return a(self, locals) % b(self, locals);
+  },
+  '<': function(self, locals, a, b) {
+    return a(self, locals) < b(self, locals);
+  },
+  '>': function(self, locals, a, b) {
+    return a(self, locals) > b(self, locals);
+  },
+  '<=': function(self, locals, a, b) {
+    return a(self, locals) <= b(self, locals);
+  },
+  '>=': function(self, locals, a, b) {
+    return a(self, locals) >= b(self, locals);
+  },
+  '==': function(self, locals, a, b) {
+    return a(self, locals) == b(self, locals);
+  },
+  '!=': function(self, locals, a, b) {
+    return a(self, locals) != b(self, locals);
+  },
+  '===': function(self, locals, a, b) {
+    return a(self, locals) === b(self, locals);
+  },
+  '!==': function(self, locals, a, b) {
+    return a(self, locals) !== b(self, locals);
+  },
+  '=': _.noop
 };
 _.forEach(CONSTANTS, function(fn, constantName) {
   fn.constant = fn.literal = true;
@@ -159,7 +204,7 @@ Lexer.prototype.lex = function(text) {
       this.readNumber();
     } else if (this.is('\'"')) {
       this.readString(this.ch);
-    } else if (this.is('[],{}:.()=')) {
+    } else if (this.is('[],{}:.()')) {
       this.tokens.push({
         text: this.ch
       });
@@ -169,8 +214,24 @@ Lexer.prototype.lex = function(text) {
     } else if (this.isWhitespace(this.ch)) {
       this.index++;
     } else {
+      var ch2 = this.ch + this.peek();
+      var ch3 = this.ch + this.peek() + this.peek(2);
       var fn = OPERATORS[this.ch];
-      if (fn) {
+      var fn2 = OPERATORS[ch2];
+      var fn3 = OPERATORS[ch3];
+      if (fn3) {
+        this.tokens.push({
+          text: ch3,
+          fn: fn3
+        });
+        this.index += 3;
+      } else if (fn2) {
+        this.tokens.push({
+          text: ch2,
+          fn: fn2
+        });
+        this.index += 2;
+      } else if (fn) {
         this.tokens.push({
           text: this.ch,
           fn: fn
@@ -209,7 +270,7 @@ Lexer.prototype.readNumber = function() {
                  nextCh && this.isNumber(nextCh)) {
         number += ch;
       } else if (this.isExpOperator(ch) && prevCh === 'e' &&
-                (!nextCh && !this.isNumber(nextCh))) {
+                (!nextCh || !this.isNumber(nextCh))) {
         throw 'Invalid exponent';
       } else {
         break;
@@ -317,8 +378,9 @@ Lexer.prototype.readIdent = function() {
   }
 };
 
-Lexer.prototype.peek = function() {
-  return this.index < this.text.length - 1 ? this.text.charAt(this.index + 1) : false;
+Lexer.prototype.peek = function(n) {
+  n = n || 1;
+  return this.index + n < this.text.length ? this.text.charAt(this.index + n) : false;
 };
 
 Lexer.prototype.isExpOperator = function(ch) {
@@ -495,12 +557,12 @@ Parser.prototype.functionCall = function(fnFn, contextFn) {
 };
 
 Parser.prototype.assigment = function() {
-  var left = this.unary();
+  var left = this.equality();
   if (this.expect('=')) {
     if (!left.assign) {
       throw 'Implies assigment but cannot be assigned to';
     }
-    var right =  this.unary();
+    var right =  this.equality();
     return function(scope, locals) {
       return left.assign(scope, right(scope, locals), locals);
     };
@@ -522,15 +584,56 @@ Parser.prototype.unary = function() {
     unaryFn.constant = operand.constant;
     return unaryFn;
   } else if ((operator = this.expect('-'))) {
-    operand = parser.unary();
-    var binaryFn = function(self, locals) {
-      return operator.fn(self, locals, _.constant(0), operand);
-    };
-    binaryFn.constant = operand.constant;
-    return binaryFn;
+    return this.binaryFn(Parser.ZERO, operator.fn, parser.unary());
   } else {
     return this.primary();
   }
 };
+
+Parser.prototype.multiplicative = function() {
+  var left = this.unary();
+  var operator;
+  while ((operator = this.expect('*', '/', '%'))) {
+      left = this.binaryFn(left, operator.fn, this.unary());
+  }
+  return left;
+};
+
+Parser.prototype.binaryFn = function(left, op, right) {
+  var fn = function(self, locals) {
+    return op(self, locals, left, right);
+  };
+  fn.constant = left.constant && right.constant;
+  return fn;
+};
+
+Parser.prototype.additive = function() {
+  var left = this.multiplicative();
+  var operator;
+  while ((operator = this.expect('+', '-'))) {
+    left = this.binaryFn(left, operator.fn, this.multiplicative());
+  }
+  return left;
+};
+
+Parser.prototype.equality = function() {
+  var left = this.relational();
+  var operator;
+  while ((operator = this.expect('==', '!=', '===', '!=='))) {
+    left = this.binaryFn(left, operator.fn, this.relational());
+  }
+  return left;
+};
+
+Parser.prototype.relational = function() {
+  var left = this.additive();
+  var operator;
+  while ((operator = this.expect('<', '>', '<=', '>='))) {
+    left = this.binaryFn(left, operator.fn, this.additive());
+  }
+  return left;
+};
+
+Parser.ZERO = _.extend(_.constant(0), {constant: true});
 
 module.exports = parse;
