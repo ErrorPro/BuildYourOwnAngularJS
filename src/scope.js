@@ -1,4 +1,5 @@
 var _ = require('lodash');
+var parse = require('./parse.js');
 
 function initWatchVal() { }
 function Scope() {
@@ -16,6 +17,13 @@ function Scope() {
 
 Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
   var self = this;
+
+  watchFn = parse(watchFn);
+
+  if (watchFn.$$watchDelegate) {
+    return watchFn.$$watchDelegate(self, listenerFn, valueEq, watchFn);
+  }
+
   var watcher = {
     watchFn: watchFn,
     listenerFn: listenerFn || function() {},
@@ -114,13 +122,13 @@ Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
 };
 
 Scope.prototype.$eval = function(expr, locals) {
-  return expr(this, locals);
+  return parse(expr)(this, locals);
 };
 
 Scope.prototype.$apply = function(expr) {
   try {
     this.$beginPhase('$apply');
-    return this.$eval(expr);
+    return this.$eval(parse(expr));
   } finally {
     this.$clearPhase('$apply');
     this.$root.$digest();
@@ -136,7 +144,7 @@ Scope.prototype.$evalAsync = function(expr) {
       }
     }, 0);
   }
-  self.$$asyncQueue.push({scope: this, expression: expr});
+  self.$$asyncQueue.push({scope: this, expression: parse(expr)});
 };
 
 Scope.prototype.$beginPhase = function(phase) {
@@ -280,6 +288,8 @@ Scope.prototype.$watchCollection = function(watchFn, listenerFn) {
   var trackVeryOldValue = (listenerFn.length > 1);
   var changeCount = 0;
   var firstRun = true;
+
+  watchFn = parse(watchFn);
 
   var internalWatchFn = function(scope) {
     var newLength;

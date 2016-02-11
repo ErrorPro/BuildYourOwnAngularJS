@@ -64,17 +64,122 @@ var OPERATORS = {
   '!==': function(self, locals, a, b) {
     return a(self, locals) !== b(self, locals);
   },
-  '=': _.noop
+  '=': _.noop,
+  '&&': function(self, locals, a, b) {
+    return a(self, locals) && b(self, locals);
+  },
+  '||': function(self, locals, a, b) {
+    return a(self, locals) || b(self, locals);
+  }
 };
 _.forEach(CONSTANTS, function(fn, constantName) {
-  fn.constant = fn.literal = true;
+  fn.constant = fn.literal = fn.sharedGetter = true;
 });
 
 function parse(expr) {
-  var lexer = new Lexer();
-  var parser = new Parser(lexer);
+  switch (typeof expr) {
+    case 'string':
+      var lexer = new Lexer();
+      var parser = new Parser(lexer);
+      var oneTime = false;
+      if (expr.charAt(0) === ':' && expr.charAt(1) === ':') {
+        oneTime = true;
+        expr = expr.substring(2);
+      }
+      var parseFn = parser.parse(expr);
 
-  return parser.parse(expr);
+      if (parseFn.constant) {
+        parseFn.$$watchDelegate = constantWatchDelegate;
+      } else if (oneTime) {
+        parseFn = wrapSharedExpression(parseFn);
+        parseFn.$$watchDelegate = parseFn.literal ? oneTimeLiteralWatchDelegate : oneTimeWatchDelegate;
+      }
+
+      return parseFn;
+    case 'function':
+      return expr;
+    default:
+      return _.noop;
+  }
+}
+
+function wrapSharedExpression(exprFn) {
+  var wrapped = exprFn;
+  if (wrapped.sharedGetter) {
+    wrapped = function(self, locals) {
+      return exprFn(self, locals);
+    };
+    wrapped.constant = exprFn.constant;
+    wrapped.literal = exprFn.literal;
+    wrapped.assign = exprFn.assign;
+  }
+
+  return wrapped;
+}
+
+function constantWatchDelegate(scope, listenerFn, valueEq, watchFn) {
+  var unwatch = scope.$watch(
+    function() {
+      return watchFn(scope);
+    },
+    function(newValue, oldValue, scope) {
+      if (_.isFunction(listenerFn)) {
+        listenerFn.apply(this, arguments);
+      }
+      unwatch();
+    },
+    valueEq
+  );
+  return unwatch;
+}
+
+function oneTimeWatchDelegate(scope, listenerFn, valueEq, watchFn) {
+  var lastValue;
+  var unwatch = scope.$watch(
+    function() {
+      return watchFn(scope);
+    },
+    function(newValue, oldValue, scope) {
+      lastValue = newValue;
+      if (_.isFunction(listenerFn)) {
+        listenerFn.apply(this, arguments);
+      }
+      if (!_.isUndefined(newValue)) {
+        scope.$$postDigest(function() {
+          if (!_.isUndefined(lastValue)) {
+            unwatch();
+          }
+        });
+      }
+    },
+    valueEq
+  );
+  return unwatch;
+}
+
+function oneTimeLiteralWatchDelegate(scope, listenerFn, valueEq, watchFn) {
+  function isAllDefined(val) {
+    return !_.any(val, _.isUndefined);
+  }
+  var unwatch = scope.$watch(
+    function() {
+      return watchFn(scope);
+    },
+    function(newValue, oldValue, scope) {
+      if (_.isFunction(listenerFn)) {
+        listenerFn.apply(this, arguments);
+      }
+      if (isAllDefined(newValue)) {
+        scope.$$postDigest(function() {
+          if (isAllDefined(newValue)) {
+            unwatch();
+          }
+        });
+      }
+    },
+    valueEq
+  );
+  return unwatch;
 }
 
 var getterFn = _.memoize(function(ident) {
@@ -88,6 +193,7 @@ var getterFn = _.memoize(function(ident) {
     fn = generatedGetterFn(pathKeys);
   }
 
+  fn.sharedGetter = true;
   fn.assign = function(self, value) {
     return setter(self, ident, value);
   };
@@ -204,7 +310,7 @@ Lexer.prototype.lex = function(text) {
       this.readNumber();
     } else if (this.is('\'"')) {
       this.readString(this.ch);
-    } else if (this.is('[],{}:.()')) {
+    } else if (this.is('[],{}:.()?;')) {
       this.tokens.push({
         text: this.ch
       });
@@ -403,12 +509,15 @@ function Parser(lexer) {
 
 Parser.prototype.parse = function(text) {
   this.tokens = this.lexer.lex(text);
-  return this.assigment();
+  return this.statements();
 };
 
 Parser.prototype.primary = function() {
   var primary;
-  if (this.expect('[')) {
+  if (this.expect('(')) {
+    primary = this.assigment();
+    this.consume(')');
+  } else if (this.expect('[')) {
     primary = this.arrayDeclaration();
   } else if (this.expect('{')) {
     primary = this.object();
@@ -557,12 +666,12 @@ Parser.prototype.functionCall = function(fnFn, contextFn) {
 };
 
 Parser.prototype.assigment = function() {
-  var left = this.equality();
+  var left = this.ternary();
   if (this.expect('=')) {
     if (!left.assign) {
       throw 'Implies assigment but cannot be assigned to';
     }
-    var right =  this.equality();
+    var right =  this.ternary();
     return function(scope, locals) {
       return left.assign(scope, right(scope, locals), locals);
     };
@@ -634,6 +743,58 @@ Parser.prototype.relational = function() {
   return left;
 };
 
-Parser.ZERO = _.extend(_.constant(0), {constant: true});
+Parser.prototype.logicalOR = function() {
+  var left = this.logicalAND();
+  var operator;
+  while ((operator = this.expect('||'))) {
+    left = this.binaryFn(left, operator.fn, this.logicalAND());
+  }
+  return left;
+};
+
+Parser.prototype.logicalAND = function() {
+  var left = this.equality();
+  var operator;
+  while ((operator = this.expect('&&'))) {
+    left = this.binaryFn(left, operator.fn, this.equality());
+  }
+  return left;
+};
+
+Parser.prototype.ternary = function() {
+  var left = this.logicalOR();
+  if (this.expect('?')) {
+    var middle = this.assigment();
+    this.consume(':');
+    var right = this.assigment();
+    var ternaryFn = function(self, locals) {
+      return left(self, locals) ? middle(self, locals) : right(self, locals);
+    };
+    ternaryFn.constant = left.constant && middle.constant && right.constant;
+    return ternaryFn;
+  } else {
+    return left;
+  }
+};
+
+Parser.prototype.statements = function() {
+  var statements = [];
+  do {
+    statements.push(this.assigment());
+  } while (this.expect(';'));
+  if (statements.length === 1) {
+    return statements[0];
+  } else {
+    return function(self, locals) {
+      var value;
+      _.forEach(statements, function(statement) {
+        value = statement(self, locals);
+      });
+      return value;
+    };
+  }
+};
+
+Parser.ZERO = _.extend(_.constant(0), {constant: true, sharedGetter: true});
 
 module.exports = parse;
