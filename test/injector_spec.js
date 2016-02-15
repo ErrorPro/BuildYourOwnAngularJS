@@ -306,4 +306,140 @@ describe('annotate', function () {
     var instance = injector.instantiate(Type, {b: 3});
     expect(instance.result).toBe(4);
   });
+
+  it('allows registering a provider and uses its $get', function() {
+    var module = angular.module('myModule', []);
+    module.provider('a', {
+      $get: function() {
+        return 42;
+      }
+    });
+
+    var injector = createInjector(['myModule']);
+
+    expect(injector.has('a')).toBe(true);
+    expect(injector.get('a')).toBe(42);
+  });
+
+  it('injects the $get method of a provider', function() {
+    var module = angular.module('myModule', []);
+    module.constant('a', 1);
+    module.provider('b', {
+      $get: function(a) {
+        return a + 2;
+      }
+    });
+
+    var injector = createInjector(['myModule']);
+
+    expect(injector.get('b')).toBe(3);
+  });
+
+  it('injects the $get method of a provider lazily', function() {
+    var module = angular.module('myModule', []);
+    module.provider('b', {
+      $get: function(a) {
+        return a + 2;
+      }
+    });
+    module.provider('a', {$get: _.constant(1)});
+
+    var injector = createInjector(['myModule']);
+
+    expect(injector.get('b')).toBe(3);
+  });
+
+  it('instantiates a dependency only once', function() {
+    var module = angular.module('myModule', []);
+    module.provider('a', {$get: function() { return {}; }});
+
+    var injector = createInjector(['myModule']);
+
+    expect(injector.get('a')).toBe(injector.get('a'));
+  });
+
+  it('notifies the user about a circular depedency', function() {
+    var module = angular.module('myModule', []);
+    module.provider('a', {$get: function(b) {}});
+    module.provider('b', {$get: function(c) {}});
+    module.provider('c', {$get: function(a) {}});
+
+    var injector = createInjector(['myModule']);
+
+    expect(function() {
+      injector.get('a');
+    }).toThrowError(/Circular dependency found/);
+  });
+
+  it('cleans up the circular marker when instantiating fails', function() {
+    var module = angular.module('myModule', []);
+    module.provider('a', {$get: function() {
+      throw new Error('Failing instantiation');
+    }});
+
+    var injector = createInjector(['myModule']);
+
+    expect(function() {
+      injector.get('a');
+    }).toThrowError('Failing instantiation');
+    expect(function() {
+      injector.get('a');
+    }).toThrowError('Failing instantiation');
+  });
+
+  it('notifies the user about a circular depedency', function() {
+    var module = angular.module('myModule', []);
+    module.provider('a', {$get: function(b) {}});
+    module.provider('b', {$get: function(c) {}});
+    module.provider('c', {$get: function(a) {}});
+
+    var injector = createInjector(['myModule']);
+
+    expect(function() {
+      injector.get('a');
+    }).toThrowError('Circular dependency found: a <- c <- b <- a');
+  });
+
+  it('instantiating a provider if given as a constructor function', function() {
+    var module = angular.module('myModule', []);
+
+    module.provider('a', function AProvider() {
+      this.$get = function() { return 42; };
+    });
+
+    var injector = createInjector(['myModule']);
+
+    expect(injector.get('a')).toBe(42);
+  });
+
+  it('injects the given provider constructor function', function() {
+    var module = angular.module('myModule', []);
+
+    module.constant('b', 2);
+    module.provider('a', function AProvider(b) {
+      this.$get = function() { return 1 + b; };
+    });
+
+    var injector = createInjector(['myModule']);
+
+    expect(injector.get('a')).toBe(3);
+  });
+
+  it('inject another provider to a provider construction function', function() {
+    var module = angular.module('myModule', []);
+
+    module.provider('a', function AProvider() {
+      var value = 1;
+      this.setValue = function(v) { value = v; };
+      this.$get = function() { return value; };
+    });
+    module.provider('b', function BProvider(aProvider) {
+      aProvider.setValue(2);
+      this.$get = function() {};
+    });
+
+    var injector = createInjector(['myModule']);
+
+    expect(injector.get('a')).toBe(2);
+  });
 });
