@@ -1,21 +1,17 @@
 require('../src/Angular.js');
-
+var createInjector = require('../src/injector.js');
+var publishExternalApi = require('../src/angular_public.js');
 var Scope = require('../src/scope.js');
 var _ = require('lodash');
 
 describe('Scope', function() {
-  it('Can be constructed and used as an object', function() {
-    var scope = new Scope();
-    scope.aProperty = 1;
-
-    expect(scope.aProperty).toBe(1);
-  });
 
   describe('digest', function() {
     var scope;
 
     beforeEach(function() {
-      scope = new Scope();
+      publishExternalApi();
+      scope = createInjector(['ng']).get('$rootScope');
     });
 
     it('calls the listener function of a watch on first $digest', function() {
@@ -843,7 +839,8 @@ describe('Scope', function() {
     var scope;
 
     beforeEach(function() {
-      scope = new Scope();
+      publishExternalApi();
+      scope = createInjector(['ng']).get('$rootScope');
     });
 
     it('takes watches as an array and calls listener with arrays', function() {
@@ -1032,8 +1029,14 @@ describe('Scope', function() {
   });
 
   describe('inheritance', function() {
+    var parent;
+
+    beforeEach(function() {
+      publishExternalApi();
+      parent = createInjector(['ng']).get('$rootScope');
+    });
+
     it('inheritance the parents properties', function() {
-      var parent = new Scope();
       parent.aValue = [1, 2, 3];
 
       var child = parent.$new();
@@ -1042,15 +1045,12 @@ describe('Scope', function() {
     });
 
     it('doesnt cause a parent to inherit its properties', function() {
-      var parent = new Scope();
-
       var child = parent.$new();
       child.aValue = [1, 2, 3];
       expect(parent.aValue).toBeUndefined();
     });
 
     it('inherits the parents properties whenever they are defined', function() {
-      var parent = new Scope();
       var child = parent.$new();
 
       parent.aValue = [1, 2, 3];
@@ -1059,7 +1059,6 @@ describe('Scope', function() {
     });
 
     it('can manipulate a parent scopes property', function() {
-      var parent = new Scope();
       var child = parent.$new();
       parent.aValue = [1, 2, 3];
 
@@ -1070,7 +1069,6 @@ describe('Scope', function() {
     });
 
     it('can watch a property in the parent', function() {
-      var parent = new Scope();
       var child = parent.$new();
       parent.aValue = [1, 2, 3];
       child.counter = 0;
@@ -1092,7 +1090,7 @@ describe('Scope', function() {
     });
 
     it('can be nested at any depth', function() {
-      var a = new Scope();
+      var a = parent;
       var aa = a.$new();
       var aaa = aa.$new();
       var aab = aa.$new();
@@ -1115,7 +1113,6 @@ describe('Scope', function() {
     });
 
     it('shadows a parents property with the same name', function() {
-      var parent = new Scope();
       var child = parent.$new();
 
       parent.name = 'Joe';
@@ -1126,7 +1123,6 @@ describe('Scope', function() {
     });
 
     it('does not shadow members of parent scopes attributes', function() {
-      var parent = new Scope();
       var child = parent.$new();
 
       parent.user = {name: 'Joe'};
@@ -1137,7 +1133,6 @@ describe('Scope', function() {
     });
 
     it('doesnt digest its parent', function() {
-      var parent = new Scope();
       var child = parent.$new();
 
       parent.aValue = 'abc';
@@ -1153,7 +1148,6 @@ describe('Scope', function() {
     });
 
     it('keeps a record of its children', function() {
-      var parent = new Scope();
       var child1 = parent.$new();
       var child2 = parent.$new();
       var child2_1 = child2.$new();
@@ -1168,7 +1162,6 @@ describe('Scope', function() {
     });
 
     it('digests its children', function() {
-      var parent = new Scope();
       var child = parent.$new();
 
       parent.aValue = 'abc';
@@ -1184,7 +1177,6 @@ describe('Scope', function() {
     });
 
     it('digests from root on $apply', function() {
-      var parent = new Scope();
       var child = parent.$new();
       var child2 = child.$new();
 
@@ -1203,7 +1195,6 @@ describe('Scope', function() {
     });
 
     it('schedules a digest from root on $evalAsync', function(done) {
-      var parent = new Scope();
       var child = parent.$new();
       var child2 = child.$new();
 
@@ -1227,7 +1218,6 @@ describe('Scope', function() {
     });
 
     it('doesnt have access to parent attributes when isolated', function() {
-      var parent = new Scope();
       var child = parent.$new(true);
 
       parent.aValue = 'abc';
@@ -1236,7 +1226,6 @@ describe('Scope', function() {
     });
 
     it('cannot watch parent attributes when isolated', function() {
-      var parent = new Scope();
       var child = parent.$new(true);
 
       parent.aValue = 'abc';
@@ -1253,7 +1242,6 @@ describe('Scope', function() {
     });
 
     it('executes $evalAsync functions on isolated scopes', function(done) {
-      var parent = new Scope();
       var child = parent.$new(true);
 
       child.$evalAsync(function(scope) {
@@ -1267,7 +1255,6 @@ describe('Scope', function() {
     });
 
     it('executes $$postDigest functions on isolated scopes', function(done) {
-      var parent = new Scope();
       var child = parent.$new(true);
 
       child.$$postDigest(function() {
@@ -1283,8 +1270,8 @@ describe('Scope', function() {
     });
 
     it('can take some other scope as the parent', function() {
-      var prototypeParent = new Scope();
-      var hierarchyParent = new Scope();
+      var prototypeParent = parent.$new();
+      var hierarchyParent = parent.$new();
       var child = prototypeParent.$new(false, hierarchyParent);
 
       prototypeParent.a = 42;
@@ -1303,7 +1290,6 @@ describe('Scope', function() {
     });
 
     it('is no longer digested when $destroy has been called', function() {
-      var parent = new Scope();
       var child = parent.$new();
 
       child.aValue = [1, 2, 3];
@@ -1334,7 +1320,8 @@ describe('Scope', function() {
     var scope;
 
     beforeEach(function() {
-      scope = new Scope();
+      publishExternalApi();
+      scope = createInjector(['ng']).get('$rootScope');
     });
 
     it('works like a normal watch for non-collections', function() {
@@ -1766,7 +1753,8 @@ describe('Scope', function() {
     var isolatedChild;
 
     beforeEach(function() {
-      parent = new Scope();
+      publishExternalApi();
+      parent = createInjector(['ng']).get('$rootScope');
       scope = parent.$new();
       child = scope.$new();
       isolatedChild = scope.$new(true);
@@ -2096,6 +2084,39 @@ describe('Scope', function() {
       scope.$destroy();
 
       expect(listener).toHaveBeenCalled();
+    });
+  });
+
+  describe('TTL configurability', function () {
+    beforeEach(function() {
+      publishExternalApi();
+    });
+
+    it('allows configuring a shorter TTL', function() {
+      var injector = createInjector(['ng', function($rootScopeProvider) {
+        $rootScopeProvider.digestTtl(5);
+      }]);
+      var scope = injector.get('$rootScope');
+
+      scope.counterA = 0;
+      scope.counterB = 0;
+
+      scope.$watch(
+        function(scope) { return scope.counterA; },
+        function(newValue, oldValue, scope) {
+          if (scope.counterB < 5) {
+            scope.counterB++;
+          }
+        }
+      );
+      scope.$watch(
+        function(scope) { return scope.counterB; },
+        function(newValue, oldValue, scope) {
+          scope.counterA++;
+        }
+      );
+
+      expect(function() { scope.$digest(); }).toThrow();
     });
   });
 });

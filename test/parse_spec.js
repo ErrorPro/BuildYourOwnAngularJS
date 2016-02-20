@@ -1,9 +1,16 @@
 'use strict';
-
-var parse = require('../src/parse.js');
+var createInjector = require('../src/injector.js');
+var publishExternalApi = require('../src/angular_public.js');
 var _ = require('lodash');
 
 describe('parse', function() {
+  var parse;
+
+  beforeEach(function() {
+    publishExternalApi();
+    parse = createInjector(['ng']).get('$parse');
+  });
+
   it ('can parse an integer', function() {
     var fn = parse('42');
     expect(fn).toBeDefined();

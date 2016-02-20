@@ -76,33 +76,37 @@ _.forEach(CONSTANTS, function(fn, constantName) {
   fn.constant = fn.literal = fn.sharedGetter = true;
 });
 
-function parse(expr) {
-  switch (typeof expr) {
-    case 'string':
-      var lexer = new Lexer();
-      var parser = new Parser(lexer);
-      var oneTime = false;
-      if (expr.charAt(0) === ':' && expr.charAt(1) === ':') {
-        oneTime = true;
-        expr = expr.substring(2);
-      }
-      var parseFn = parser.parse(expr);
+function $ParseProvider() {
+  this.$get = function() {
+    return function(expr) {
+      switch (typeof expr) {
+        case 'string':
+          var lexer = new Lexer();
+          var parser = new Parser(lexer);
+          var oneTime = false;
+          if (expr.charAt(0) === ':' && expr.charAt(1) === ':') {
+            oneTime = true;
+            expr = expr.substring(2);
+          }
+          var parseFn = parser.parse(expr);
 
-      if (parseFn.constant) {
-        parseFn.$$watchDelegate = constantWatchDelegate;
-      } else if (oneTime) {
-        parseFn = wrapSharedExpression(parseFn);
-        parseFn.$$watchDelegate = parseFn.literal ? oneTimeLiteralWatchDelegate : oneTimeWatchDelegate;
-      } else if (parseFn.inputs) {
-        parseFn.$$watchDelegate = inputWatchDelegate;
-      }
+          if (parseFn.constant) {
+            parseFn.$$watchDelegate = constantWatchDelegate;
+          } else if (oneTime) {
+            parseFn = wrapSharedExpression(parseFn);
+            parseFn.$$watchDelegate = parseFn.literal ? oneTimeLiteralWatchDelegate : oneTimeWatchDelegate;
+          } else if (parseFn.inputs) {
+            parseFn.$$watchDelegate = inputWatchDelegate;
+          }
 
-      return parseFn;
-    case 'function':
-      return expr;
-    default:
-      return _.noop;
-  }
+          return parseFn;
+        case 'function':
+          return expr;
+        default:
+          return _.noop;
+      }
+    };
+  };
 }
 
 function inputWatchDelegate(scope, listenerFn, valueEq, watchFn) {
@@ -849,4 +853,4 @@ Parser.prototype.statements = function() {
 
 Parser.ZERO = _.extend(_.constant(0), {constant: true, sharedGetter: true});
 
-module.exports = parse;
+module.exports = $ParseProvider;
