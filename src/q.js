@@ -21,10 +21,28 @@ function $QProvider() {
     };
 
     Promise.prototype.finally = function(callback) {
-      return this.then(function() {
-        callback();
-      }, function() {
-        callback();
+      return this.then(function(value) {
+        var callbackValue = callback();
+        if (callbackValue && callbackValue.then) {
+          return callbackValue.then(function() {
+            return value;
+          });
+        } else {
+          return value;
+        }
+      }, function(rejection) {
+        var callbackValue = callback();
+        if (callbackValue && callbackValue.then) {
+          return callbackValue.then(function() {
+            var d = new Deferred();
+            d.reject(rejection);
+            return d.promise;
+          });
+        } else {
+          var d = new Deferred();
+          d.reject(rejection);
+          return d.promise;
+        }
       });
     };
 
@@ -32,13 +50,20 @@ function $QProvider() {
       this.promise = new Promise();
     }
 
-    Deferred.prototype.resolve = function(v) {
+    Deferred.prototype.resolve = function(value) {
       if (this.promise.$$state.status) {
         return;
       }
-      this.promise.$$state.value = v;
-      this.promise.$$state.status = 1;
-      scheduleProcessQueue(this.promise.$$state);
+      if (value && _.isFunction(value.then)){
+        value.then(
+          _.bind(this.resolve, this),
+          _.bind(this.reject, this)
+        );
+      } else {
+        this.promise.$$state.value = value;
+        this.promise.$$state.status = 1;
+        scheduleProcessQueue(this.promise.$$state);
+      }
     };
 
     Deferred.prototype.reject = function(reason) {
@@ -67,12 +92,16 @@ function $QProvider() {
         pending.forEach(function(handlers) {
           var deferred = handlers[0];
           var fn = handlers[state.status];
-          if (_.isFunction(fn)) {
-            deferred.resolve(fn(state.value));
-          } else if (state.status === 1) {
-            deferred.resolve(state.value);
-          } else if (state.status === 2) {
-            deferred.reject(state.value);
+          try{
+            if (_.isFunction(fn)) {
+              deferred.resolve(fn(state.value));
+            } else if (state.status === 1) {
+              deferred.resolve(state.value);
+            } else if (state.status === 2) {
+              deferred.reject(state.value);
+            }
+          } catch (e) {
+            deferred.reject(e);
           }
         });
       }
