@@ -6,10 +6,10 @@ function $QProvider() {
       this.$$state = {};
     }
 
-    Promise.prototype.then = function (onFullFiled, onRejected) {
+    Promise.prototype.then = function (onFullFiled, onRejected, onProgress) {
       var result = new Deferred();
       this.$$state.pending = this.$$state.pending || [];
-      this.$$state.pending.push([result, onFullFiled, onRejected]);
+      this.$$state.pending.push([result, onFullFiled, onRejected, onProgress]);
       if (this.$$state.status > 0) {
         scheduleProcessQueue(this.$$state);
       }
@@ -55,6 +55,23 @@ function $QProvider() {
       this.promise.$$state.value = reason;
       this.promise.$$state.status = 2;
       scheduleProcessQueue(this.promise.$$state);
+    };
+
+    Deferred.prototype.notify = function(progress) {
+      var pending = this.promise.$$state.pending;
+      if (pending && pending.length && !this.promise.$$state.status) {
+        $rootScope.$evalAsync(function() {
+          _.forEach(pending, function(handlers) {
+            var deferred = handlers[0];
+            var progressBack = handlers[3];
+            try {
+              deferred.notify(_.isFunction(progressBack) ? progressBack(progress) : progress);
+            } catch(e) {
+              console.log(e);
+            }
+          });
+        });
+      }
     };
 
     function defer() {
