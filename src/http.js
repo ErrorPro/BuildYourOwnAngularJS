@@ -242,11 +242,11 @@ function $HttpProvider() {
       config.headers = mergeHeaders(requestConfig);
       var promise = $q.when(config);
       _.forEach(interceptors, function(interceptor) {
-        promise = promise.then(interceptor.request);
+        promise = promise.then(interceptor.request, interceptor.requestsError);
       });
       promise = promise.then(serverRequest);
       _.forEachRight(interceptors, function(interceptor) {
-        promise = promise.then(interceptor.response);
+        promise = promise.then(interceptor.response, interceptor.responseError);
       });
 
       return promise;
