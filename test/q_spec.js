@@ -3,12 +3,13 @@ var publishExternalApi = require('../src/angular_public.js');
 var _ = require('lodash');
 
 describe('$q', function () {
-  var $q, $rootScope;
+  var $q, $$q, $rootScope;
 
   beforeEach(function() {
     publishExternalApi();
     var injector = createInjector(['ng']);
     $q = injector.get('$q');
+    $$q = injector.get('$$q');
     $rootScope = injector.get('$rootScope');
   });
 
@@ -574,7 +575,7 @@ describe('$q', function () {
     d.notify('working...');
     $rootScope.$apply();
 
-    expect(progressSpy).toHaveBeenCalledWith('working...')
+    expect(progressSpy).toHaveBeenCalledWith('working...');
   });
 
   it('transforms progress through handlers', function() {
@@ -626,5 +627,213 @@ describe('$q', function () {
     $rootScope.$apply();
 
     expect(progressSpy).toHaveBeenCalledWith('working...');
+  });
+
+  it('allows attaching progressback in finally', function() {
+    var d = $q.defer();
+    var progressSpy = jasmine.createSpy();
+    d.promise.finally(null, progressSpy);
+
+    d.notify('working...');
+    $rootScope.$apply();
+
+    expect(progressSpy).toHaveBeenCalledWith('working...');
+  });
+
+  it('can make an immediately rejected promise', function() {
+    var fullFillSpy = jasmine.createSpy();
+    var rejectedSpy = jasmine.createSpy();
+
+    var promise = $q.reject('fail');
+    promise.then(fullFillSpy, rejectedSpy);
+
+    $rootScope.$apply();
+
+    expect(fullFillSpy).not.toHaveBeenCalled();
+    expect(rejectedSpy).toHaveBeenCalledWith('fail');
+  });
+
+  it('can make an immediately resolved promise', function() {
+    var fullFillSpy = jasmine.createSpy();
+    var rejectedSpy = jasmine.createSpy();
+
+    var promise = $q.when('ok');
+    promise.then(fullFillSpy, rejectedSpy);
+
+    $rootScope.$apply();
+
+    expect(fullFillSpy).toHaveBeenCalledWith('ok');
+    expect(rejectedSpy).not.toHaveBeenCalled();
+  });
+
+  it('can wrap a foreign promise', function() {
+    var fullFillSpy = jasmine.createSpy();
+    var rejectedSpy = jasmine.createSpy();
+
+    var promise = $q.when({
+      then: function(handler) {
+        $rootScope.$evalAsync(function() {
+          handler('ok');
+        });
+      }
+    });
+    promise.then(fullFillSpy, rejectedSpy);
+
+    $rootScope.$apply();
+
+    expect(fullFillSpy).toHaveBeenCalledWith('ok');
+    expect(rejectedSpy).not.toHaveBeenCalled();
+  });
+
+  it('takes callbacks directly when wrapping', function() {
+    var fullFillSpy = jasmine.createSpy();
+    var rejectedSpy = jasmine.createSpy();
+    var progressSpy = jasmine.createSpy();
+
+    var wrapped = $q.defer();
+    $q.when(
+      wrapped.promise,
+      fullFillSpy,
+      rejectedSpy,
+      progressSpy
+    );
+
+    wrapped.notify('working...');
+    wrapped.resolve('ok');
+    $rootScope.$apply();
+
+    expect(fullFillSpy).toHaveBeenCalledWith('ok');
+    expect(rejectedSpy).not.toHaveBeenCalled();
+    expect(progressSpy).toHaveBeenCalledWith('working...');
+  });
+
+  describe('all', function () {
+    it('can resolve an array of promises to array of results', function() {
+      var promises = $q.all([$q.when(1), $q.when(2), $q.when(3)]);
+      var fullFillSpy = jasmine.createSpy();
+      promises.then(fullFillSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).toHaveBeenCalledWith([1, 2, 3]);
+    });
+
+    it('can resolve an object of promises to an object of results', function() {
+      var promise = $q.all({a: $q.when(1), b: $q.when(2)});
+      var fullFillSpy = jasmine.createSpy();
+      promise.then(fullFillSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).toHaveBeenCalledWith({a: 1, b: 2});
+    });
+
+    it('resolves an empty array of promises immediately', function() {
+      var promise = $q.all([]);
+      var fullFillSpy = jasmine.createSpy();
+      promise.then(fullFillSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).toHaveBeenCalledWith([]);
+    });
+
+    it('resolves an empty object of promises immediately', function() {
+      var promise = $q.all({});
+      var fullFillSpy = jasmine.createSpy();
+      promise.then(fullFillSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).toHaveBeenCalledWith({});
+    });
+
+    it('rejects when any of the promises rejects', function() {
+      var promise = $q.all([$q.when(1), $q.when(2), $q.reject('fail')]);
+      var fullFillSpy = jasmine.createSpy();
+      var rejectedSpy = jasmine.createSpy();
+      promise.then(fullFillSpy, rejectedSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).not.toHaveBeenCalled();
+      expect(rejectedSpy).toHaveBeenCalledWith('fail');
+    });
+
+    it('wraps non-promises in the input collection', function() {
+      var promise = $q.all([$q.when(1), 2, 3]);
+      var fullFillSpy = jasmine.createSpy();
+      promise.then(fullFillSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).toHaveBeenCalledWith([1, 2, 3]);
+    });
+  });
+
+  describe('ES6 style', function () {
+    it('is a function', function() {
+      expect($q instanceof Function).toBe(true);
+    });
+
+    it('expects a function as an argument', function() {
+      expect($q).toThrow();
+      $q(_.noop);
+    });
+
+    it('returns a promise', function() {
+      expect($q(_.noop)).toBeDefined();
+      expect($q(_.noop).then).toBeDefined();
+    });
+
+    it('calls function with a resolve function', function() {
+      var fullFillSpy = jasmine.createSpy();
+
+      $q(function(resolve) {
+        resolve('ok');
+      }).then(fullFillSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).toHaveBeenCalledWith('ok');
+    });
+
+    it('calls function with a reject function', function() {
+      var fullFillSpy = jasmine.createSpy();
+      var rejectedSpy = jasmine.createSpy();
+
+      $q(function(resolve, reject) {
+        reject('fail');
+      }).then(fullFillSpy, rejectedSpy);
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).not.toHaveBeenCalled();
+      expect(rejectedSpy).toHaveBeenCalledWith('fail');
+    });
+  });
+
+  describe('$$q', function () {
+    it('uses deferreds that do not resolve at digest', function() {
+      var d = $$q.defer();
+      var fullFillSpy = jasmine.createSpy();
+      d.promise.then(fullFillSpy);
+      d.resolve('ok');
+
+      $rootScope.$apply();
+
+      expect(fullFillSpy).not.toHaveBeenCalled();
+    });
+
+    it('uses deferreds that resolve later', function() {
+      var d = $$q.defer();
+      var fullFillSpy = jasmine.createSpy();
+      d.promise.then(fullFillSpy);
+      d.resolve('ok');
+
+      setTimeout(function() {
+        expect(fullFillSpy).toHaveBeenCalledWith('ok');
+      }, 1000);
+    });
   });
 });
