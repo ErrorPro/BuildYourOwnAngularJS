@@ -8,6 +8,8 @@ function publishExternalApi() {
   ngModule.provider('$rootScope', require('./scope.js'));
   ngModule.provider('$q', require('./q.js').$QProvider);
   ngModule.provider('$$q', require('./q.js').$$QProvider);
+  ngModule.provider('$http', require('./http.js'));
+  ngModule.provider('$httpBackend', require('./http_backend.js'));
 }
 
 module.exports = publishExternalApi;

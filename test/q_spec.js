@@ -835,5 +835,18 @@ describe('$q', function () {
         expect(fullFillSpy).toHaveBeenCalledWith('ok');
       }, 1000);
     });
+
+    it('does not invoke digest', function() {
+      var d = $$q.defer();
+      d.promise.then(_.noop);
+      d.resolve('ok');
+
+      var watchSpy = jasmine.createSpy();
+      $rootScope.$apply();
+
+      setTimeout(function() {
+        expect(watchSpy).not.toHaveBeenCalled();
+      }, 1000);
+    });
   });
 });
