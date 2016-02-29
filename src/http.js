@@ -29,11 +29,19 @@ function $HttpProvider() {
   function defaultHttpResponseTransform(data, headers) {
     if (_.isString(data)) {
       var contentType = headers('Content-Type');
-      if (contentType && contentType.indexOf('application/json') === 0) {
+      if (contentType && contentType.indexOf('application/json') === 0 || isJsonLike(data)) {
         return JSON.parse(data);
       }
     }
     return data;
+  }
+
+  function isJsonLike(data) {
+    if (data.match(/^\{(?!\{)/)) {
+      return data.match(/\}$/);
+    } else if (data.match(/^\[/)) {
+      return data.match(/\]$/);
+    }
   }
 
   function isBlob(object) {
@@ -127,6 +135,26 @@ function $HttpProvider() {
     };
   }
 
+  function buildUrl(url, params) {
+    _.forEach(params, function(value, key) {
+      if (_.isNull(value) || _.isUndefined(value)) {
+        return;
+      }
+      if (!_.isArray(value)) {
+        value = [value];
+      }
+      _.forEach(value, function(v) {
+        if (_.isObject(v)) {
+          v = JSON.stringify(v);
+        }
+        url += (url.indexOf('?') === -1) ? '?' : '&';
+        url += encodeURIComponent(key) + '=' + encodeURIComponent(v);
+      });
+    });
+
+    return url;
+  }
+
   this.$get = ['$httpBackend', '$q', '$rootScope', function($httpBackend, $q, $rootScope) {
     function sendReq(config, reqData) {
       var deferred = $q.defer();
@@ -145,9 +173,11 @@ function $HttpProvider() {
         }
       }
 
+      var url = buildUrl(config.url, config.params);
+
       $httpBackend(
         config.method,
-        config.url,
+        url,
         reqData,
         done,
         config.headers,
@@ -206,6 +236,23 @@ function $HttpProvider() {
     }
 
     $http.defaults = defaults;
+    _.forEach(['get', 'head', 'delete'], function(method) {
+      $http[method] = function(url, config) {
+        $http(_.extend(config || {}, {
+          method: method.toUpperCase(),
+          url: url
+        }));
+      };
+    });
+    _.forEach(['post', 'patch', 'put'], function(method) {
+      $http[method] = function(url, data, config) {
+        $http(_.extend(config || {}, {
+          method: method.toUpperCase(),
+          url: url,
+          data: data
+        }));
+      };
+    });
     return $http;
   }];
 }

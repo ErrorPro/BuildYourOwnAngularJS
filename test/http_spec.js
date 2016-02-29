@@ -497,4 +497,178 @@ describe('$http', function () {
     expect(_.isObject(response.data)).toBe(true);
     expect(response.data.message).toBe('Hello');
   });
+
+  it('parses a JSON object response without content type', function() {
+    var response;
+    $http({
+      url: 'http://teropa.info'
+    }).then(function(r) {
+      response = r;
+    });
+    requests[0].respond(200, {}, '{"message":"hello"}');
+
+    expect(_.isObject(response.data)).toBe(true);
+    expect(response.data.message).toBe('hello');
+  });
+
+  it('parses a JSON array response without content type', function() {
+    var response;
+    $http({
+      url: 'http://teropa.info'
+    }).then(function(r) {
+      response = r;
+    });
+    requests[0].respond(200, {}, '[1, 2, 3]');
+
+    expect(_.isArray(response.data)).toBe(true);
+    expect(response.data).toEqual([1, 2, 3]);
+  });
+
+  it('does not choke on response resembling JSON but not valid', function() {
+    var response;
+    $http({
+      url: 'http://teropa.info'
+    }).then(function(r) {
+      response = r;
+    });
+    requests[0].respond(200, {}, '{1, 2, 3]');
+
+    expect(response.data).toEqual('{1, 2, 3]');
+  });
+
+  it('does not try to parse interpolate expr as JSON', function() {
+    var response;
+    $http({
+      url: 'http://teropa.info'
+    }).then(function(r) {
+      response = r;
+    });
+    requests[0].respond(200, {}, '{{expr}}');
+
+    expect(response.data).toEqual('{{expr}}');
+  });
+
+  it('adds params to URL', function() {
+    $http({
+      url: 'http://teropa.info',
+      params: {
+        a: 42
+      }
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?a=42');
+  });
+
+  it('adds additional params to URL', function() {
+    $http({
+      url: 'http://teropa.info?a=42',
+      params: {
+        b: 42
+      }
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?a=42&b=42');
+  });
+
+  it('escapes url characters in params', function() {
+    $http({
+      url: 'http://teropa.info',
+      params: {
+        '==': '&&'
+      }
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?%3D%3D=%26%26');
+  });
+
+  it('does not attach null or undefined params', function() {
+    $http({
+      url: 'http://teropa.info',
+      params: {
+        a: null,
+        b: undefined
+      }
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info');
+  });
+
+  it('attaches multiple params from arrays', function() {
+    $http({
+      url: 'http://teropa.info',
+      params: {
+        a: [41, 42]
+      }
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?a=41&a=42');
+  });
+
+  it('serialize objects to json', function() {
+    $http({
+      url: 'http://teropa.info',
+      params: {
+        a: {b: 42}
+      }
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?a=%7B%22b%22%3A42%7D');
+  });
+
+  it('supports shorthand method for GET', function() {
+    $http.get('http://teropa.info', {
+      params: {q: 42}
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?q=42');
+    expect(requests[0].method).toBe('GET');
+  });
+
+  it('supports shorthand method for HEAD', function() {
+    $http.head('http://teropa.info', {
+      params: {q: 42}
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?q=42');
+    expect(requests[0].method).toBe('HEAD');
+  });
+
+  it('supports shorthand method for DELETE', function() {
+    $http.delete('http://teropa.info', {
+      params: {q: 42}
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?q=42');
+    expect(requests[0].method).toBe('DELETE');
+  });
+
+  it('supports shorthand method for POST with data', function() {
+    $http.post('http://teropa.info', 'data', {
+      params: {q: 42}
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?q=42');
+    expect(requests[0].method).toBe('POST');
+    expect(requests[0].requestBody).toBe('data');
+  });
+
+  it('supports shorthand method for PUT with data', function() {
+    $http.put('http://teropa.info', 'data', {
+      params: {q: 42}
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?q=42');
+    expect(requests[0].method).toBe('PUT');
+    expect(requests[0].requestBody).toBe('data');
+  });
+
+  it('supports shorthand method for PATCH with data', function() {
+    $http.patch('http://teropa.info', 'data', {
+      params: {q: 42}
+    });
+
+    expect(requests[0].url).toBe('http://teropa.info?q=42');
+    expect(requests[0].method).toBe('PATCH');
+    expect(requests[0].requestBody).toBe('data');
+  });
 });
