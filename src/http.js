@@ -1,6 +1,7 @@
 var _ = require('lodash');
 
 function $HttpProvider() {
+  var interceptorFactories = this.interceptors = [];
   var defaults = this.defaults = {
     headers: {
       common: {
@@ -155,46 +156,12 @@ function $HttpProvider() {
     return url;
   }
 
-  this.$get = ['$httpBackend', '$q', '$rootScope', function($httpBackend, $q, $rootScope) {
-    function sendReq(config, reqData) {
-      var deferred = $q.defer();
+  this.$get = ['$httpBackend', '$q', '$rootScope', '$injector', function($httpBackend, $q, $rootScope, $injector) {
+    var interceptors = _.map(interceptorFactories, function(fn) {
+      return _.isString(fn) ? $injector.get(fn) : $injector.invoke(fn);
+    });
 
-      function done(status, response, headersString, statusText) {
-        status = Math.max(status, 0);
-        deferred[isSuccess(status) ? 'resolve' : 'reject']({
-          status: status,
-          data: response,
-          statusText: statusText,
-          headers: headerGetter(headersString),
-          config: config
-        });
-        if (!$rootScope.$$phase) {
-          $rootScope.$apply();
-        }
-      }
-
-      var url = buildUrl(config.url, config.params);
-
-      $httpBackend(
-        config.method,
-        url,
-        reqData,
-        done,
-        config.headers,
-        config.withCredentials
-      );
-      return deferred.promise;
-    }
-
-    function $http(requestConfig) {
-      var config = _.extend({
-        method: 'GET',
-        transformRequest: defaults.transformRequest,
-        transformResponse: defaults.transformResponse
-      }, requestConfig);
-
-      config.headers = mergeHeaders(requestConfig);
-
+    function serverRequest(config) {
       if (_.isUndefined(config.withCredentials) &&
           !_.isUndefined(defaults.withCredentials)) {
         config.withCredentials = defaults.withCredentials;
@@ -235,10 +202,60 @@ function $HttpProvider() {
         .then(transformResponse, transformResponse);
     }
 
+    function sendReq(config, reqData) {
+      var deferred = $q.defer();
+
+      function done(status, response, headersString, statusText) {
+        status = Math.max(status, 0);
+        deferred[isSuccess(status) ? 'resolve' : 'reject']({
+          status: status,
+          data: response,
+          statusText: statusText,
+          headers: headerGetter(headersString),
+          config: config
+        });
+        if (!$rootScope.$$phase) {
+          $rootScope.$apply();
+        }
+      }
+
+      var url = buildUrl(config.url, config.params);
+
+      $httpBackend(
+        config.method,
+        url,
+        reqData,
+        done,
+        config.headers,
+        config.withCredentials
+      );
+      return deferred.promise;
+    }
+
+    function $http(requestConfig) {
+      var config = _.extend({
+        method: 'GET',
+        transformRequest: defaults.transformRequest,
+        transformResponse: defaults.transformResponse
+      }, requestConfig);
+
+      config.headers = mergeHeaders(requestConfig);
+      var promise = $q.when(config);
+      _.forEach(interceptors, function(interceptor) {
+        promise = promise.then(interceptor.request);
+      });
+      promise = promise.then(serverRequest);
+      _.forEachRight(interceptors, function(interceptor) {
+        promise = promise.then(interceptor.response);
+      });
+
+      return promise;
+    }
+
     $http.defaults = defaults;
     _.forEach(['get', 'head', 'delete'], function(method) {
       $http[method] = function(url, config) {
-        $http(_.extend(config || {}, {
+        return $http(_.extend(config || {}, {
           method: method.toUpperCase(),
           url: url
         }));
@@ -246,7 +263,7 @@ function $HttpProvider() {
     });
     _.forEach(['post', 'patch', 'put'], function(method) {
       $http[method] = function(url, data, config) {
-        $http(_.extend(config || {}, {
+        return $http(_.extend(config || {}, {
           method: method.toUpperCase(),
           url: url,
           data: data
