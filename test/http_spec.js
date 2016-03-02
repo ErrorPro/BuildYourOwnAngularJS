@@ -887,4 +887,59 @@ describe('$http', function () {
       expect(requests[0].aborted).toBe(true);
     }, 5001);
   });
+
+  describe('pending requests', function () {
+    it('are in the collection while pending', function() {
+      $http.get('http://teropa.info');
+      $rootScope.$apply();
+
+      expect($http.pendingRequests).toBeDefined();
+      expect($http.pendingRequests.length).toBe(1);
+      expect($http.pendingRequests[0].url).toBe('http://teropa.info');
+
+      requests[0].respond(200, {}, 'OK');
+      $rootScope.$apply();
+
+      expect($http.pendingRequests.length).toBe(0);
+    });
+
+    it('are also creared on failure', function() {
+      $http.get('http://teropa.info');
+      $rootScope.$apply();
+
+      requests[0].respond(404, {}, 'Not found');
+
+      expect($http.pendingRequests.length).toBe(0);
+    });
+  });
+
+  describe('useApplyAsync', function () {
+    beforeEach(function() {
+      var injector = createInjector(['ng', function($httpProvider) {
+        $httpProvider.useApplyAsync(true);
+      }]);
+      $http = injector.get('$http');
+      $rootScope = injector.get('$rootScope');
+    });
+
+    it('does not resolve promise immediately when enabled', function() {
+      var resolvedSpy = jasmine.createSpy();
+      $http.get('http://teropa.info').then(resolvedSpy);
+      $rootScope.$apply();
+
+      requests[0].respond(200, {}, 'OK');
+      expect(resolvedSpy).not.toHaveBeenCalled();
+    });
+
+    it('resolves promise later when enabled', function() {
+      var resolvedSpy = jasmine.createSpy();
+      $http.get('http://teropa.info').then(resolvedSpy);
+      $rootScope.$apply();
+
+      requests[0].respond(200, {}, 'OK');
+      setTimeout(function () {
+        expect(resolvedSpy).toHaveBeenCalled();
+      }, 100);
+    });
+  });
 });

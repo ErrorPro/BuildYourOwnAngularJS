@@ -10,6 +10,7 @@ function publishExternalApi() {
   ngModule.provider('$$q', require('./q.js').$$QProvider);
   ngModule.provider('$http', require('./http.js'));
   ngModule.provider('$httpBackend', require('./http_backend.js'));
+  ngModule.provider('$compile', require('./compile.js'));
 }
 
 module.exports = publishExternalApi;
