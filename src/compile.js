@@ -36,36 +36,74 @@ function $CompileProvider($provide) {
 
     function compileNodes($compileNodes) {
       _.forEach($compileNodes, function(node) {
-        var directives = collectDirectives(node);
-        applyDirectivesToNode(directives, node);
+        var attrs = {};
+        var directives = collectDirectives(node, attrs);
+        applyDirectivesToNode(directives, node, attrs);
         if (node.childNodes && node.childNodes.length) {
           compileNodes(node.childNodes);
         }
       });
     }
 
-    function applyDirectivesToNode(directives, compileNode) {
+    function applyDirectivesToNode(directives, compileNode, attrs) {
       var $compileNode = $(compileNode);
       _.forEach(directives, function(directive) {
+        if (directive.$$start) {
+          $compileNode = groupScan(compileNode, directive.$$start, directive.$$end);
+        }
         if (directive.compile) {
-          directive.compile($compileNode);
+          directive.compile($compileNode, attrs);
         }
       });
     }
 
-    function collectDirectives(node) {
+    function groupScan(node, startAttr, endAttr) {
+      var nodes = [];
+      if (startAttr && node && node.hasAttribute(startAttr)) {
+        var depth = 0;
+        do {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.hasAttribute(startAttr)) {
+              depth++;
+            } else if (node.hasAttribute(endAttr)) {
+              depth--;
+            }
+          }
+          nodes.push(node);
+          node = node.nextSibling;
+        } while (depth > 0);
+      } else {
+        nodes.push(node);
+      }
+      return $(nodes);
+    }
+
+    function collectDirectives(node, attrs) {
       var directives = [];
 
       if (node.nodeType === Node.ELEMENT_NODE) {
         var normalizeNodeName = directiveNormalize(nodeName(node));
         addDirective(directives, normalizeNodeName, 'E');
         _.forEach(node.attributes, function(attr) {
-          var normalizedAttr = directiveNormalize(attr.name.toLowerCase());
+          var attrStartName, attrEndName;
+          var name = attr.name;
+          var normalizedAttr = directiveNormalize(name.toLowerCase());
           if (/^ngAttr[A-Z]/.test(normalizedAttr)) {
-            normalizedAttr = normalizedAttr[6].toLowerCase() +
-            normalizedAttr.substring(7);
+            name = _.kebabCase(normalizedAttr[6].toLowerCase() +
+            normalizedAttr.substring(7));
           }
-          addDirective(directives, normalizedAttr, 'A');
+          var directiveNName = normalizedAttr.replace(/(Start|End)$/, '');
+
+          if (directiveIsMultiElement(directiveNName)) {
+            if (/Start/.test(normalizedAttr)) {
+              attrStartName = name;
+              attrEndName = name.substring(0, name.length - 5) + 'end';
+              name = name.substring(0, name.length - 5);
+            }
+          }
+          normalizedAttr = directiveNormalize(name.toLowerCase());
+          addDirective(directives, normalizedAttr, 'A', attrStartName, attrEndName);
+          attrs[normalizedAttr] = attr.value.trim();
         });
         _.forEach(node.classList, function(cls) {
           var normalizedClassName = directiveNormalize(cls);
@@ -80,6 +118,14 @@ function $CompileProvider($provide) {
       return directives;
     }
 
+    function directiveIsMultiElement(name) {
+      if (hasDirectives.hasOwnProperty(name)) {
+        var directives = $injector.get(name + 'Directive');
+        return _.any(directives, {multiElement: true});
+      }
+      return false;
+    }
+
     function directiveNormalize(name) {
       return _.camelCase(name.replace(PREFIX_REGEXP, ''));
     }
@@ -88,13 +134,21 @@ function $CompileProvider($provide) {
       return element.nodeName ? element.nodeName : element[0].nodeName;
     }
 
-    function addDirective(directives, name, mode) {
+    function addDirective(directives, name, mode, attrStartName, attrEndName) {
       if (hasDirectives.hasOwnProperty(name)) {
         var foundDirectives = $injector.get(name + 'Directive');
         var applicableDirectives = _.filter(foundDirectives, function(dir) {
           return dir.restrict.indexOf(mode) !== -1;
         });
-        directives.push.apply(directives, applicableDirectives);
+        _.forEach(applicableDirectives, function(directive) {
+          if (attrStartName) {
+            directive = _.create(directive, {
+              $$start: attrStartName,
+              $$end: attrEndName
+            });
+          }
+          directives.push(directive);
+        });
       }
     }
 
