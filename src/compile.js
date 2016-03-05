@@ -4,6 +4,24 @@ var $ = require('jquery');
 function $CompileProvider($provide) {
   var hasDirectives = {};
   var PREFIX_REGEXP = /(x[\:\-_]|data[\:\-_])/i;
+  var BOOLEAN_ATTRS = {
+    multiple: true,
+    selected: true,
+    checked: true,
+    disabled: true,
+    readOnly: true,
+    required: true,
+    open: true
+  };
+  var BOOLEAN_ELEMENTS = {
+    INPUT: true,
+    SELECT: true,
+    OPTION: true,
+    TEXTAREA: true,
+    BUTTON: true,
+    FORM: true,
+    DETAILS: true
+  };
 
   this.directive = function(name, directiveFactory) {
     if (_.isString(name)) {
@@ -30,13 +48,24 @@ function $CompileProvider($provide) {
   };
 
   this.$get = ['$injector', function($injector) {
+    function Attributes(element) {
+      this.$$element = element;
+    }
+
+    Attributes.prototype.$set = function(key, value, writeAttr) {
+      this[key] = value;
+      if (writeAttr !== false) {
+        this.$$element.attr(key, value);
+      }
+    };
+
     function compile($compileNodes) {
       return compileNodes($compileNodes);
     }
 
     function compileNodes($compileNodes) {
       _.forEach($compileNodes, function(node) {
-        var attrs = {};
+        var attrs = new Attributes($(node));
         var directives = collectDirectives(node, attrs);
         applyDirectivesToNode(directives, node, attrs);
         if (node.childNodes && node.childNodes.length) {
@@ -88,7 +117,8 @@ function $CompileProvider($provide) {
           var attrStartName, attrEndName;
           var name = attr.name;
           var normalizedAttr = directiveNormalize(name.toLowerCase());
-          if (/^ngAttr[A-Z]/.test(normalizedAttr)) {
+          var isNgAttr = /^ngAttr[A-Z]/.test(normalizedAttr);
+          if (isNgAttr) {
             name = _.kebabCase(normalizedAttr[6].toLowerCase() +
             normalizedAttr.substring(7));
           }
@@ -103,7 +133,12 @@ function $CompileProvider($provide) {
           }
           normalizedAttr = directiveNormalize(name.toLowerCase());
           addDirective(directives, normalizedAttr, 'A', attrStartName, attrEndName);
-          attrs[normalizedAttr] = attr.value.trim();
+          if (isNgAttr || !attrs.hasOwnProperty(normalizedAttr)) {
+            attrs[normalizedAttr] = attr.value.trim();
+            if (isBooleanAttribute(node, normalizedAttr)) {
+              attrs[normalizedAttr] = true;
+            }
+          }
         });
         _.forEach(node.classList, function(cls) {
           var normalizedClassName = directiveNormalize(cls);
@@ -116,6 +151,10 @@ function $CompileProvider($provide) {
         }
       }
       return directives;
+    }
+
+    function isBooleanAttribute(node, attrName) {
+      return BOOLEAN_ATTRS[attrName] && BOOLEAN_ELEMENTS[node.nodeName];
     }
 
     function directiveIsMultiElement(name) {
