@@ -35,6 +35,9 @@ function $CompileProvider($provide) {
           return _.map(factories, function(factory) {
             var directive = $injector.invoke(factory);
             directive.restrict = directive.restrict || 'EA';
+            if (directive.link && !directive.compile) {
+              directive.compile = _.constant(directive.link);
+            }
             return directive;
           });
         }]);
@@ -47,7 +50,7 @@ function $CompileProvider($provide) {
     }
   };
 
-  this.$get = ['$injector', function($injector) {
+  this.$get = ['$injector', '$rootScope', function($injector, $rootScope) {
     function Attributes(element) {
       this.$$element = element;
       this.$attr = {};
@@ -73,39 +76,131 @@ function $CompileProvider($provide) {
       if (writeAttr !== false) {
         this.$$element.attr(attrName, value);
       }
+
+      if (this.$$observers) {
+        _.forEach(this.$$observers[key], function(observer) {
+          try {
+            observer(value);
+          } catch (e) {
+            console.log(e);
+          }
+        });
+      }
     };
 
     Attributes.prototype.$observe = function(key, fn) {
+      var self = this;
       this.$$observers = this.$$observers || Object.create(null);
       this.$$observers[key] = this.$$observers[key] || [];
       this.$$observers[key].push(fn);
-    }
+      $rootScope.$evalAsync(function() {
+        fn(self[key]);
+      });
+
+      return function() {
+        var index = self.$$observers[key].indexOf(fn);
+        if (index >= 0) {
+          self.$$observers[key].splice(index, 1);
+        }
+      };
+    };
+
+    Attributes.prototype.$addClass = function(classValue) {
+      this.$$element.addClass(classValue);
+    };
+
+    Attributes.prototype.$removeClass = function(classValue) {
+      this.$$element.removeClass(classValue);
+    };
+
+    Attributes.prototype.$updateClass = function(newClassVal, oldClassVal) {
+      var newClasses = newClassVal.split(/\s+/);
+      var oldClasses = oldClassVal.split(/\s+/);
+      var addedClasses = _.difference(newClasses, oldClasses);
+      var removedClasses = _.difference(oldClasses, newClasses);
+
+      if (addedClasses.length) {
+        this.$addClass(addedClasses.join(' '));
+      }
+
+      if(removedClasses.length) {
+        this.$removeClass(removedClasses.join(' '));
+      }
+    };
 
     function compile($compileNodes) {
-      return compileNodes($compileNodes);
+     var compositeLinkFn = compileNodes($compileNodes);
+
+     return function publicLinkFn(scope) {
+       $compileNodes.data('$scope', scope);
+       compositeLinkFn(scope, $compileNodes);
+     };
     }
 
     function compileNodes($compileNodes) {
-      _.forEach($compileNodes, function(node) {
+      var linkFns = [];
+      _.forEach($compileNodes, function(node, i) {
         var attrs = new Attributes($(node));
         var directives = collectDirectives(node, attrs);
-        applyDirectivesToNode(directives, node, attrs);
+        var nodeLinkFn;
+        if (directives.length) {
+          nodeLinkFn = applyDirectivesToNode(directives, node, attrs);
+        }
+        var childLinkFn;
         if (node.childNodes && node.childNodes.length) {
-          compileNodes(node.childNodes);
+          childLinkFn = compileNodes(node.childNodes);
+        }
+        if (nodeLinkFn || childLinkFn) {
+          linkFns.push({
+            nodeLinkFn: nodeLinkFn,
+            childLinkFn: childLinkFn,
+            idx: i
+          });
         }
       });
+
+      function compositeLinkFn(scope, linkNodes) {
+        _.forEach(linkFns, function(linkFn) {
+          if (linkFn.nodeLinkFn) {
+            linkFn.nodeLinkFn(linkFn.childLinkFn, scope, linkNodes[linkFn.idx]);
+          } else {
+            linkFn.childLinkFn(
+              scope,
+              linkNodes[linkFn.idx].childNodes
+            );
+          }
+        });
+      }
+
+      return compositeLinkFn;
     }
 
     function applyDirectivesToNode(directives, compileNode, attrs) {
       var $compileNode = $(compileNode);
+      var linkFns = [];
       _.forEach(directives, function(directive) {
         if (directive.$$start) {
           $compileNode = groupScan(compileNode, directive.$$start, directive.$$end);
         }
         if (directive.compile) {
-          directive.compile($compileNode, attrs);
+          var linkFn = directive.compile($compileNode, attrs);
+          if (linkFn) {
+            linkFns.push(linkFn);
+          }
         }
       });
+
+      function nodeLinkFn(childLinkFn, scope, linkNode) {
+        if (childLinkFn) {
+          childLinkFn(scope, linkNode.childNodes);
+        }
+        _.forEach(linkFns, function(linkFn) {
+          var $element = $(linkNode);
+          linkFn(scope, $element, attrs);
+        });
+      }
+
+      return nodeLinkFn;
     }
 
     function groupScan(node, startAttr, endAttr) {
@@ -131,7 +226,7 @@ function $CompileProvider($provide) {
 
     function collectDirectives(node, attrs) {
       var directives = [];
-
+      var match;
       if (node.nodeType === Node.ELEMENT_NODE) {
         var normalizeNodeName = directiveNormalize(nodeName(node));
         addDirective(directives, normalizeNodeName, 'E');
@@ -164,14 +259,23 @@ function $CompileProvider($provide) {
             }
           }
         });
-        _.forEach(node.classList, function(cls) {
-          var normalizedClassName = directiveNormalize(cls);
-          addDirective(directives, normalizedClassName, 'C');
-        });
+        var className = node.className;
+        if (_.isString(className) && !_.isEmpty(className)) {
+          while ((match = /([\d\w\-_]+)(?:\:([^;]+))?;?/.exec(className))) {
+            var normalizedClassName = directiveNormalize(match[1]);
+            if (addDirective(directives, normalizedClassName, 'C')) {
+              attrs[normalizedClassName] = match[2] ? match[2].trim() : undefined;
+            }
+            className = className.substr(match.index + match[0].length);
+          }
+        }
       } else if (node.nodeType === Node.COMMENT_NODE) {
-        var match = /^\s*directive\:\s*([\d\w\-_]+)/.exec(node.nodeValue);
+        match = /^\s*directive\:\s*([\d\w\-_]+)\s*(.*)$/.exec(node.nodeValue);
         if (match) {
-          addDirective(directives, directiveNormalize(match[1]), 'M');
+          var normalizedName = directiveNormalize(match[1]);
+          if (addDirective(directives, normalizedName, 'M')) {
+            attrs[normalizedName] = match[2] ? match[2].trim() : undefined;
+          }
         }
       }
       return directives;
@@ -198,6 +302,7 @@ function $CompileProvider($provide) {
     }
 
     function addDirective(directives, name, mode, attrStartName, attrEndName) {
+      var match;
       if (hasDirectives.hasOwnProperty(name)) {
         var foundDirectives = $injector.get(name + 'Directive');
         var applicableDirectives = _.filter(foundDirectives, function(dir) {
@@ -211,8 +316,10 @@ function $CompileProvider($provide) {
             });
           }
           directives.push(directive);
+          match = directive;
         });
       }
+      return match;
     }
 
     return compile;
