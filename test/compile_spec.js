@@ -1353,5 +1353,161 @@ describe('$compile', function () {
         expect(givenScope.myAttr).toBe(42);
       });
     });
+
+    it('throws when isolate scope expression returns new arrays', function() {
+      var givenScope;
+      var injector = makeInjectorWithDirectives('myDirective', function() {
+        return {
+          scope: {
+            myAttr: '='
+          },
+          link: function(scope) {
+            givenScope = scope;
+          }
+        };
+      });
+      injector.invoke(function($compile, $rootScope) {
+        $rootScope.parentFunction = function() {
+          return [1, 2, 3];
+        };
+        var el = $('<div my-directive my-attr="parentFunction()"></div>');
+        $compile(el)($rootScope);
+        expect(function() {
+          $rootScope.$digest();
+        }).toThrow();
+      });
+    });
+
+    it('can watch isolate scope expressions as colletions', function() {
+      var givenScope;
+      var injector = makeInjectorWithDirectives('myDirective', function() {
+        return {
+          scope: {
+            myAttr: '=*'
+          },
+          link: function(scope) {
+            givenScope = scope;
+          }
+        };
+      });
+      injector.invoke(function($compile, $rootScope) {
+        $rootScope.parentFunction = function() {
+          return [1, 2, 3];
+        };
+        var el = $('<div my-directive my-attr="parentFunction()"></div>');
+        $compile(el)($rootScope);
+        $rootScope.$digest();
+        expect(givenScope.myAttr).toEqual([1, 2, 3]);
+      });
+    });
+
+    it('allows binding an invokable expression on the parent scope', function() {
+      var givenScope;
+      var injector = makeInjectorWithDirectives('myDirective', function() {
+        return {
+          scope: {
+            myExpr: '&'
+          },
+          link: function(scope) {
+            givenScope = scope;
+          }
+        };
+      });
+      injector.invoke(function($compile, $rootScope) {
+        $rootScope.parentFunction = function() {
+          return 42;
+        };
+        var el = $('<div my-directive my-expr="parentFunction() + 1"></div>');
+        $compile(el)($rootScope);
+        expect(givenScope.myExpr()).toBe(43);
+      });
+    });
+
+    it('allows passing arguments to parent scope expressions', function() {
+      var givenScope;
+      var injector = makeInjectorWithDirectives('myDirective', function() {
+        return {
+          scope: {
+            myExpr: '&'
+          },
+          link: function(scope) {
+            givenScope = scope;
+          }
+        };
+      });
+      injector.invoke(function($compile, $rootScope) {
+        var gotArg;
+        $rootScope.parentFunction = function(arg) {
+          gotArg = arg;
+        };
+        var el = $('<div my-directive my-expr="parentFunction(argFromChild)"></div>"');
+        $compile(el)($rootScope);
+        givenScope.myExpr({argFromChild: 42});
+        expect(gotArg).toBe(42);
+      });
+    });
+  });
+
+  describe('controllers', function () {
+    it('can be attached to directives as functions', function() {
+      var controllerInvoked;
+      var injector = makeInjectorWithDirectives('myDirective', function() {
+        return {
+          controller: function MyController() {
+            controllerInvoked = true;
+          }
+        };
+      });
+      injector.invoke(function($compile, $rootScope) {
+        var el = $('<div my-directive></div>');
+        $compile(el)($rootScope);
+        expect(controllerInvoked).toBe(true);
+      });
+    });
+
+    it('can be attached to directives as string references', function() {
+      var controllerInvoked;
+      function MyController() {
+        controllerInvoked = true;
+      }
+      var injector = createInjector(['ng', function($controllerProvider, $compileProvider) {
+        $controllerProvider.register('MyController', MyController);
+        $compileProvider.directive('myDirective', function() {
+          return {controller: 'MyController'};
+        });
+      }]);
+      injector.invoke(function($compile, $rootScope) {
+        var el = $('<div my-directive></div>');
+        $compile(el)($rootScope);
+        expect(controllerInvoked).toBe(true);
+      });
+    });
+
+    it('can be applied in the same element independent of each other', function() {
+      var controllerInvoked;
+      var otherControllerInvoked;
+      function MyController() {
+        controllerInvoked = true;
+      }
+      function MyOtherController() {
+        otherControllerInvoked = true;
+      }
+      var injector = createInjector(['ng', function($controllerProvider, $compileProvider) {
+        $controllerProvider.register('MyController', MyController);
+        $controllerProvider.register('MyOtherController', MyOtherController);
+        $compileProvider.directive('myDirective', function() {
+          return {controller: 'MyController'};
+        });
+        $compileProvider.directive('myOtherDirective', function() {
+          return {controller: 'MyOtherController'};
+        });
+      }]);
+      injector.invoke(function($compile, $rootScope) {
+        var el = $('<div my-directive my-other-directive></div>');
+        $compile(el)($rootScope);
+        expect(controllerInvoked).toBe(true);
+        expect(otherControllerInvoked).toBe(true);
+      });
+    });
   });
 });
